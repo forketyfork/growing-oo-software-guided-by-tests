@@ -8,6 +8,7 @@ repositories {
 
 dependencies {
     testImplementation(libs.windowlicker)
+    testImplementation(libs.smack)
 }
 
 testing {

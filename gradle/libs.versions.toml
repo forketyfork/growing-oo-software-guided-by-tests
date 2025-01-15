@@ -1,5 +1,7 @@
 [versions]
 windowlicker = "r268"
+smack = "3.2.1"
 
 [libraries]
 windowlicker = { module = "com.googlecode.windowlicker:windowlicker-swing", version.ref = "windowlicker" }
+smack = { module = "org.igniterealtime.smack:smack", version.ref = "smack" }
