@@ -1,0 +1,5 @@
+[versions]
+windowlicker = "r268"
+
+[libraries]
+windowlicker = { module = "com.googlecode.windowlicker:windowlicker-swing", version.ref = "windowlicker" }
