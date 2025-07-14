@@ -34,3 +34,5 @@ bin/
 # Ignore Gradle build output directory
 build
 
+# Ignore the openfire working directory
+openfire/
