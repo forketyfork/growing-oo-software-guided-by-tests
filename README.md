@@ -5,8 +5,8 @@ Code along with the book "Growing Object-Oriented Software Guided by Tests"
 The book doesn't define any dependency management solution or particular project structure.
 I used Gradle as the easiest dependency management tool.
 
-The windowlicker library is pretty old (~12 years), but it's available in the Maven repos. 
-Smack (XMPP client) is also available
+The windowlicker library is pretty old (the last version was published in 2012), but it's available in the Maven repos. 
+Smack (XMPP client) was last published in 2011 but is also available.
 
 ## Running the XMPP server
 
@@ -20,4 +20,7 @@ nix-shell -p stabber
 stabber -p 5230 -h 5231 -l DEBUG
 ```
 
-Might want to add some nix setup to the project to automate this.
+## Nix setup
+
+The project contains a Nix shell setup with direnv. 
+Make sure to have Nix and direnv installed, and run `direnv allow` in this directory.
