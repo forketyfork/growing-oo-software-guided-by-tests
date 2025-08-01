@@ -1,5 +1,7 @@
 package me.forketyfork.growing;
 
+import me.forketyfork.growing.auctionsniper.ui.MainWindow;
+
 public class ApplicationRunner {
     public static final String SNIPER_ID = "sniper";
     public static final String SNIPER_PASSWORD = "sniper";
@@ -20,11 +22,11 @@ public class ApplicationRunner {
         thread.setDaemon(true);
         thread.start();
         driver = new AuctionSniperDriver(1000);
-        driver.showsSniperStatus(Main.STATUS_JOINING);
+        driver.showsSniperStatus(MainWindow.STATUS_JOINING);
     }
 
     public void showsSniperHasLostAuction() {
-        driver.showsSniperStatus(Main.STATUS_LOST);
+        driver.showsSniperStatus(MainWindow.STATUS_LOST);
     }
 
     public void stop() {
