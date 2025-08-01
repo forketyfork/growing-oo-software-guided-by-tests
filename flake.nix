@@ -16,7 +16,7 @@
                     buildInputs = with pkgs; [
                         stabber
                         jdk21
-                        (writeShellScriptBin "stabber-up" "stabber -p 5230 -h 5231 -l DEBUG &")
+                        (writeShellScriptBin "stabber-up" "stabber -p 5222 -h 5223 -l DEBUG &")
                         (writeShellScriptBin "stabber-down" "pkill stabber")
                     ];
                     
