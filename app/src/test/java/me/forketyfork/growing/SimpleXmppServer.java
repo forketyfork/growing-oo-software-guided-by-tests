@@ -1,17 +1,7 @@
 package me.forketyfork.growing;
 
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerException;
-import javax.xml.transform.TransformerFactory;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
+import javax.xml.namespace.QName;
+import javax.xml.stream.*;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -26,6 +16,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * A minimal XMPP server that supports Smack 4.5+ authentication flow.
  * Supports SASL PLAIN authentication and basic IQ handling.
+ * Uses StAX streaming parser for proper namespace-aware XML processing.
  */
 @SuppressWarnings("HttpUrlsUsage")
 public class SimpleXmppServer {
@@ -114,11 +105,12 @@ public class SimpleXmppServer {
         }
     }
 
-    private record XmppRequest(Type type, Element element) {
+    private record XmppRequest(Type type, XmppStanza stanza) {
         enum Type {STREAM_START, SASL_AUTH, IQ, STREAM_END}
     }
 
-    private record XmppResponse(Document document, boolean authenticate, boolean closeConnection) {
+    private record XmppResponse(ResponseType type, XmppStanza stanza, boolean authenticate, boolean closeConnection) {
+        enum ResponseType {STREAM_START, SASL_SUCCESS, IQ_RESULT, STREAM_END}
 
         boolean shouldAuthenticate() {
             return authenticate;
@@ -129,6 +121,55 @@ public class SimpleXmppServer {
         }
     }
 
+    private static class XmppStanza {
+        private final QName name;
+        private final java.util.Map<String, String> attributes;
+        private final String textContent;
+        private final java.util.List<XmppStanza> children;
+        private final String namespace;
+
+        public XmppStanza(QName name, java.util.Map<String, String> attributes) {
+            this(name, attributes, null, new java.util.ArrayList<>());
+        }
+
+        public XmppStanza(QName name, java.util.Map<String, String> attributes, String textContent) {
+            this(name, attributes, textContent, new java.util.ArrayList<>());
+        }
+
+        public XmppStanza(QName name, java.util.Map<String, String> attributes, String textContent, java.util.List<XmppStanza> children) {
+            this.name = name;
+            this.attributes = attributes != null ? new java.util.HashMap<>(attributes) : new java.util.HashMap<>();
+            this.textContent = textContent;
+            this.children = children != null ? new java.util.ArrayList<>(children) : new java.util.ArrayList<>();
+            this.namespace = name.getNamespaceURI();
+        }
+
+        public QName getName() {
+            return name;
+        }
+
+        public java.util.Map<String, String> getAttributes() {
+            return attributes;
+        }
+
+        public String getTextContent() {
+            return textContent;
+        }
+
+        public java.util.List<XmppStanza> getChildren() {
+            return children;
+        }
+
+        public String getNamespace() {
+            return namespace;
+        }
+
+        public String getAttribute(String name) {
+            return attributes.get(name);
+        }
+
+    }
+
     private XmppRequest parseRequest(BufferedReader in) throws IOException {
         StringBuilder buffer = new StringBuilder();
         int ch;
@@ -137,34 +178,27 @@ public class SimpleXmppServer {
             buffer.append((char) ch);
             String data = buffer.toString();
 
-            if (data.contains("</stream:stream>")) {
+            // Check for stream end (namespace-aware)
+            if (data.matches(".*</[^:]*:?stream>.*")) {
                 return new XmppRequest(XmppRequest.Type.STREAM_END, null);
             }
 
-            if (data.contains("<stream:stream")) {
+            // Check for stream start (namespace-aware)
+            if (data.matches(".*<[^:]*:?stream[^>]*>.*")) {
                 return new XmppRequest(XmppRequest.Type.STREAM_START, null);
             }
 
-            // Try to parse complete stanzas
+            // Try to parse complete stanzas using namespace-aware approach
             try {
-                if (data.contains("<auth ")) {
-                    String stanza = extractCompleteStanza(data, "auth");
-                    if (stanza != null) {
-                        Element element = parseStanza(stanza);
-                        if (element != null) {
-                            return new XmppRequest(XmppRequest.Type.SASL_AUTH, element);
-                        }
-                    }
+                XmppStanza stanza = extractAndParseStanza(data, "auth");
+                if (stanza != null && isNamespaceMatch(stanza.getNamespace(), "urn:ietf:params:xml:ns:xmpp-sasl")) {
+                    return new XmppRequest(XmppRequest.Type.SASL_AUTH, stanza);
                 }
 
-                if (data.contains("<iq ")) {
-                    String stanza = extractCompleteStanza(data, "iq");
-                    if (stanza != null) {
-                        Element element = parseStanza(stanza);
-                        if (element != null) {
-                            return new XmppRequest(XmppRequest.Type.IQ, element);
-                        }
-                    }
+                stanza = extractAndParseStanza(data, "iq");
+                if (stanza != null && (isNamespaceMatch(stanza.getNamespace(), "jabber:client") ||
+                        stanza.getNamespace() == null || stanza.getNamespace().isEmpty())) {
+                    return new XmppRequest(XmppRequest.Type.IQ, stanza);
                 }
             } catch (Exception e) {
                 // Continue reading
@@ -174,251 +208,294 @@ public class SimpleXmppServer {
         return null; // Connection closed
     }
 
-    private String extractCompleteStanza(String data, String tagName) {
-        int start = data.indexOf("<" + tagName + " ");
-        if (start == -1) return null;
+    private XmppStanza extractAndParseStanza(String data, String tagName) throws XMLStreamException {
+        // Look for complete stanza (with closing tag or self-closed)
+        String stanzaXml = extractCompleteStanza(data, tagName);
+        if (stanzaXml == null) return null;
 
-        int end = data.indexOf("</" + tagName + ">", start);
-        if (end != -1) {
-            return data.substring(start, end + tagName.length() + 3);
+        return parseStanzaXml(stanzaXml);
+    }
+
+    private String extractCompleteStanza(String data, String tagName) {
+        // Look for the opening tag (with any namespace prefix)
+        java.util.regex.Pattern openPattern = java.util.regex.Pattern.compile("<(?:[^:]+:)?" + tagName + "[^>]*>");
+        java.util.regex.Matcher openMatcher = openPattern.matcher(data);
+
+        if (!openMatcher.find()) return null;
+
+        int start = openMatcher.start();
+        String openTag = openMatcher.group();
+
+        // Check if it's self-closed
+        if (openTag.endsWith("/>")) {
+            return openTag;
         }
 
-        end = data.indexOf("/>", start);
-        if (end != -1) {
-            return data.substring(start, end + 2);
+        // Look for closing tag
+        java.util.regex.Pattern closePattern = java.util.regex.Pattern.compile("</(?:[^:]+:)?" + tagName + ">");
+        java.util.regex.Matcher closeMatcher = closePattern.matcher(data);
+
+        if (closeMatcher.find(start)) {
+            return data.substring(start, closeMatcher.end());
         }
 
         return null;
     }
 
-    private Element parseStanza(String stanza) {
-        try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            DocumentBuilder builder = factory.newDocumentBuilder();
+    private XmppStanza parseStanzaXml(String xml) throws XMLStreamException {
+        XMLInputFactory factory = XMLInputFactory.newInstance();
+        factory.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, Boolean.TRUE);
 
-            // Suppress XML parsing error messages
-            builder.setErrorHandler(new org.xml.sax.ErrorHandler() {
-                public void warning(org.xml.sax.SAXParseException e) {
-                }
+        XMLStreamReader reader = factory.createXMLStreamReader(new java.io.StringReader(xml));
 
-                public void error(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
-                    throw e;
-                }
-
-                public void fatalError(org.xml.sax.SAXParseException e) throws org.xml.sax.SAXException {
-                    throw e;
-                }
-            });
-
-            // Wrap the stanza in a root element to make it a valid XML document
-            String wrappedStanza = "<root xmlns:stream='http://etherx.jabber.org/streams'>" + stanza + "</root>";
-            Document doc = builder.parse(new InputSource(new StringReader(wrappedStanza)));
-
-            // Return the first child (the actual stanza) instead of the wrapper
-            return (Element) doc.getDocumentElement().getFirstChild();
-        } catch (Exception e) {
-            return null;
+        // Move to start element
+        while (reader.hasNext() && reader.getEventType() != XMLStreamConstants.START_ELEMENT) {
+            reader.next();
         }
+
+        if (reader.getEventType() == XMLStreamConstants.START_ELEMENT) {
+            return parseStanzaFromReader(reader);
+        }
+
+        return null;
     }
 
-    private Element createFeatures(boolean authenticated) {
-        try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            Document doc = factory.newDocumentBuilder().newDocument();
-            Element features = doc.createElementNS("http://etherx.jabber.org/streams", "stream:features");
+    private XmppStanza parseStanzaFromReader(XMLStreamReader reader) throws XMLStreamException {
+        QName elementName = reader.getName();
+        java.util.Map<String, String> attributes = new java.util.HashMap<>();
 
-            if (!authenticated) {
-                Element mechanisms = doc.createElement("mechanisms");
-                mechanisms.setAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
-
-                Element mechanism = doc.createElement("mechanism");
-                mechanism.setTextContent("PLAIN");
-                mechanisms.appendChild(mechanism);
-
-                features.appendChild(mechanisms);
-            } else {
-                Element compression = doc.createElement("compression");
-                compression.setAttribute("xmlns", "http://jabber.org/features/compress");
-
-                Element method = doc.createElement("method");
-                method.setTextContent("zlib");
-                compression.appendChild(method);
-
-                features.appendChild(compression);
-
-                Element bind = doc.createElement("bind");
-                bind.setAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-bind");
-                features.appendChild(bind);
-
-                Element session = doc.createElement("session");
-                session.setAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-session");
-                features.appendChild(session);
-            }
-
-            return features;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create features", e);
+        // Read attributes
+        for (int i = 0; i < reader.getAttributeCount(); i++) {
+            attributes.put(reader.getAttributeLocalName(i), reader.getAttributeValue(i));
         }
+
+        java.util.List<XmppStanza> children = new java.util.ArrayList<>();
+        StringBuilder textContent = new StringBuilder();
+
+        while (reader.hasNext()) {
+            int event = reader.next();
+
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                XmppStanza child = parseStanzaFromReader(reader);
+                children.add(child);
+            } else if (event == XMLStreamConstants.CHARACTERS) {
+                textContent.append(reader.getText());
+            } else if (event == XMLStreamConstants.END_ELEMENT) {
+                QName endName = reader.getName();
+                if (endName.equals(elementName)) {
+                    break;
+                }
+            }
+        }
+
+        String content = textContent.toString().trim();
+        return new XmppStanza(elementName, attributes, content.isEmpty() ? null : content, children);
+    }
+
+    private boolean isNamespaceMatch(String actualNs, String expectedNs) {
+        if (actualNs == null) actualNs = "";
+        if (expectedNs == null) expectedNs = "";
+        return actualNs.equals(expectedNs);
+    }
+
+    private XmppStanza createFeatures(boolean authenticated) {
+        QName featuresName = new QName("http://etherx.jabber.org/streams", "features");
+        java.util.List<XmppStanza> children = new java.util.ArrayList<>();
+
+        if (!authenticated) {
+            // SASL mechanisms
+            QName mechanismsName = new QName("urn:ietf:params:xml:ns:xmpp-sasl", "mechanisms");
+            QName mechanismName = new QName("urn:ietf:params:xml:ns:xmpp-sasl", "mechanism");
+            XmppStanza mechanism = new XmppStanza(mechanismName, new java.util.HashMap<>(), "PLAIN");
+            XmppStanza mechanisms = new XmppStanza(mechanismsName, new java.util.HashMap<>(), null, java.util.List.of(mechanism));
+            children.add(mechanisms);
+        } else {
+            // Compression feature
+            QName compressionName = new QName("http://jabber.org/features/compress", "compression");
+            QName methodName = new QName("http://jabber.org/features/compress", "method");
+            XmppStanza method = new XmppStanza(methodName, new java.util.HashMap<>(), "zlib");
+            XmppStanza compression = new XmppStanza(compressionName, new java.util.HashMap<>(), null, java.util.List.of(method));
+            children.add(compression);
+
+            // Bind feature
+            QName bindName = new QName("urn:ietf:params:xml:ns:xmpp-bind", "bind");
+            XmppStanza bind = new XmppStanza(bindName, new java.util.HashMap<>());
+            children.add(bind);
+
+            // Session feature
+            QName sessionName = new QName("urn:ietf:params:xml:ns:xmpp-session", "session");
+            XmppStanza session = new XmppStanza(sessionName, new java.util.HashMap<>());
+            children.add(session);
+        }
+
+        return new XmppStanza(featuresName, new java.util.HashMap<>(), null, children);
     }
 
     private XmppResponse handleRequest(XmppRequest request, boolean authenticated) {
-        try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            Document responseDoc = factory.newDocumentBuilder().newDocument();
-
-            return switch (request.type) {
-                case STREAM_START -> createStreamResponse(responseDoc, authenticated);
-                case SASL_AUTH -> createSaslResponse(responseDoc);
-                case IQ -> createIqResponse(responseDoc, request.element);
-                case STREAM_END -> createStreamEndResponse();
-            };
-        } catch (Exception e) {
-            return new XmppResponse(null, false, true);
-        }
+        return switch (request.type) {
+            case STREAM_START -> createStreamResponse(authenticated);
+            case SASL_AUTH -> createSaslResponse();
+            case IQ -> createIqResponse(request.stanza);
+            case STREAM_END -> createStreamEndResponse();
+        };
     }
 
-    private XmppResponse createStreamResponse(Document doc, boolean authenticated) {
-        // Create a complete response with stream header and features
-        Element root = doc.createElement("xmpp-response");
-        doc.appendChild(root);
-
-        // Add stream header info
-        Element streamHeader = doc.createElement("stream-header");
-        streamHeader.setAttribute("from", "localhost");
-        streamHeader.setAttribute("id", "test-" + System.currentTimeMillis());
-        streamHeader.setAttribute("version", "1.0");
-        root.appendChild(streamHeader);
-
-        // Add features
-        Element features = createFeatures(authenticated);
-        Element importedFeatures = (Element) doc.importNode(features, true);
-        root.appendChild(importedFeatures);
-
-        return new XmppResponse(doc, false, false);
+    private XmppResponse createStreamResponse(boolean authenticated) {
+        XmppStanza features = createFeatures(authenticated);
+        return new XmppResponse(XmppResponse.ResponseType.STREAM_START, features, false, false);
     }
 
-    private XmppResponse createSaslResponse(Document doc) {
-        Element success = doc.createElementNS("urn:ietf:params:xml:ns:xmpp-sasl", "success");
-        doc.appendChild(success);
-
-        return new XmppResponse(doc, true, false);
+    private XmppResponse createSaslResponse() {
+        QName successName = new QName("urn:ietf:params:xml:ns:xmpp-sasl", "success");
+        XmppStanza success = new XmppStanza(successName, new java.util.HashMap<>());
+        return new XmppResponse(XmppResponse.ResponseType.SASL_SUCCESS, success, true, false);
     }
 
-    private XmppResponse createIqResponse(Document doc, Element iqElement) {
-        Element response = handleIqElement(iqElement);
-        if (response != null) {
-            Element importedResponse = (Element) doc.importNode(response, true);
-            doc.appendChild(importedResponse);
-            return new XmppResponse(doc, false, false);
-        }
-        return new XmppResponse(null, false, false);
+    private XmppResponse createIqResponse(XmppStanza iqStanza) {
+        XmppStanza response = handleIqStanza(iqStanza);
+        return new XmppResponse(XmppResponse.ResponseType.IQ_RESULT, response, false, false);
     }
 
     private XmppResponse createStreamEndResponse() {
-        // Just signal to close connection
-        return new XmppResponse(null, false, true);
+        return new XmppResponse(XmppResponse.ResponseType.STREAM_END, null, false, true);
     }
 
     private void sendResponse(XmppResponse response, BufferedWriter out) throws IOException {
-        if (response.document == null) {
+        if (response.stanza == null) {
             if (response.shouldCloseConnection()) {
-                out.write("</stream:stream>");
+                String closeXml = "</stream:stream>";
+                out.write(closeXml);
                 out.flush();
             }
             return;
         }
 
-        Element root = response.document.getDocumentElement();
+        try {
+            StringWriter stringWriter = new StringWriter();
+            XMLOutputFactory factory = XMLOutputFactory.newInstance();
+            XMLStreamWriter writer = factory.createXMLStreamWriter(stringWriter);
 
-        if ("xmpp-response".equals(root.getTagName())) {
-            // Stream response - handle specially
-            Element streamHeader = (Element) root.getElementsByTagName("stream-header").item(0);
-            Element features = (Element) root.getElementsByTagNameNS("http://etherx.jabber.org/streams", "features").item(0);
+            if (response.type == XmppResponse.ResponseType.STREAM_START) {
+                // Send stream header
+                String streamHeader = "<?xml version='1.0'?>" +
+                        "<stream:stream" +
+                        " from='localhost'" +
+                        " id='test-" + System.currentTimeMillis() + "'" +
+                        " version='1.0'" +
+                        " xmlns='jabber:client'" +
+                        " xmlns:stream='http://etherx.jabber.org/streams'>";
+                out.write(streamHeader);
 
-            String streamResponse = "<?xml version='1.0'?>" +
-                    "<stream:stream" +
-                    " from='" + streamHeader.getAttribute("from") + "'" +
-                    " id='" + streamHeader.getAttribute("id") + "'" +
-                    " version='" + streamHeader.getAttribute("version") + "'" +
-                    " xmlns='jabber:client'" +
-                    " xmlns:stream='http://etherx.jabber.org/streams'>" +
-                    elementToString(features);
+                // Send features - write directly as fragment, not as complete document
+                try {
+                    writeStanzaFragment(writer, response.stanza);
+                    writer.flush();
+                    String featuresXml = stringWriter.toString();
+                    out.write(featuresXml);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            } else {
+                // Regular stanza - write as fragment
+                writeStanzaFragment(writer, response.stanza);
+                String stanzaXml = stringWriter.toString();
+                out.write(stanzaXml);
+            }
 
-            out.write(streamResponse);
-        } else {
-            // Regular stanza
-            out.write(elementToString(root));
+            writer.close();
+            out.flush();
+        } catch (XMLStreamException e) {
+            throw new IOException("Failed to write XML response", e);
         }
-
-        out.flush();
     }
 
-    private Element handleIqElement(Element iq) {
-        try {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            Document doc = factory.newDocumentBuilder().newDocument();
-            String type = iq.getAttribute("type");
-            String id = iq.getAttribute("id");
-            if (id == null || id.isEmpty()) id = "response";
+    private XmppStanza handleIqStanza(XmppStanza iq) {
+        String type = iq.getAttribute("type");
+        String id = iq.getAttribute("id");
+        if (id == null || id.isEmpty()) id = "response";
 
-            Element response = doc.createElement("iq");
-            response.setAttribute("type", "result");
-            response.setAttribute("id", id);
+        java.util.Map<String, String> responseAttrs = new java.util.HashMap<>();
+        responseAttrs.put("type", "result");
+        responseAttrs.put("id", id);
 
-            // Look for queries
-            NodeList queries = iq.getElementsByTagNameNS("*", "query");
-            if (queries.getLength() > 0) {
-                Element query = (Element) queries.item(0);
-                String ns = query.getNamespaceURI();
+        QName iqName = new QName("jabber:client", "iq");
+        java.util.List<XmppStanza> responseChildren = new java.util.ArrayList<>();
+
+        // Look for query elements
+        for (XmppStanza child : iq.getChildren()) {
+            if ("query".equals(child.getName().getLocalPart())) {
+                String ns = child.getNamespace();
 
                 if ("jabber:iq:auth".equals(ns) && "get".equals(type)) {
-                    Element queryResp = doc.createElement("query");
-                    queryResp.setAttribute("xmlns", "jabber:iq:auth");
-                    queryResp.appendChild(doc.createElement("username"));
-                    queryResp.appendChild(doc.createElement("password"));
-                    queryResp.appendChild(doc.createElement("resource"));
-                    response.appendChild(queryResp);
+                    QName queryName = new QName("jabber:iq:auth", "query");
+                    java.util.List<XmppStanza> queryChildren = java.util.List.of(
+                            new XmppStanza(new QName("username"), new java.util.HashMap<>()),
+                            new XmppStanza(new QName("password"), new java.util.HashMap<>()),
+                            new XmppStanza(new QName("resource"), new java.util.HashMap<>())
+                    );
+                    responseChildren.add(new XmppStanza(queryName, new java.util.HashMap<>(), null, queryChildren));
                 } else if ("jabber:iq:roster".equals(ns) && "get".equals(type)) {
-                    Element queryResp = doc.createElement("query");
-                    queryResp.setAttribute("xmlns", "jabber:iq:roster");
-                    response.appendChild(queryResp);
+                    QName queryName = new QName("jabber:iq:roster", "query");
+                    responseChildren.add(new XmppStanza(queryName, new java.util.HashMap<>()));
                 }
+            } else if ("bind".equals(child.getName().getLocalPart()) &&
+                    "urn:ietf:params:xml:ns:xmpp-bind".equals(child.getNamespace()) &&
+                    "set".equals(type)) {
+                QName bindName = new QName("urn:ietf:params:xml:ns:xmpp-bind", "bind");
+                QName jidName = new QName("urn:ietf:params:xml:ns:xmpp-bind", "jid");
+                XmppStanza jid = new XmppStanza(jidName, new java.util.HashMap<>(), "test@localhost/resource");
+                responseChildren.add(new XmppStanza(bindName, new java.util.HashMap<>(), null, java.util.List.of(jid)));
             }
-
-            // Look for bind
-            NodeList binds = iq.getElementsByTagNameNS("urn:ietf:params:xml:ns:xmpp-bind", "bind");
-            if (binds.getLength() > 0 && "set".equals(type)) {
-                Element bindResp = doc.createElement("bind");
-                bindResp.setAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-bind");
-
-                Element jid = doc.createElement("jid");
-                jid.setTextContent("test@localhost/resource");
-                bindResp.appendChild(jid);
-
-                response.appendChild(bindResp);
-            }
-
-            return response;
-        } catch (Exception e) {
-            return null;
         }
+
+        return new XmppStanza(iqName, responseAttrs, null, responseChildren);
     }
 
-    private String elementToString(Element element) {
-        try {
-            TransformerFactory tf = TransformerFactory.newInstance();
-            Transformer transformer = tf.newTransformer();
-            transformer.setOutputProperty("omit-xml-declaration", "yes");
-
-            StringWriter writer = new StringWriter();
-            transformer.transform(new DOMSource(element), new StreamResult(writer));
-            return writer.toString();
-        } catch (TransformerException e) {
-            throw new RuntimeException("Failed to convert element to string", e);
-        }
+    private void writeStanzaFragment(XMLStreamWriter writer, XmppStanza stanza) throws XMLStreamException {
+        // This writes just the stanza element without XML declaration
+        writeStanzaElement(writer, stanza);
     }
+
+    private void writeStanzaElement(XMLStreamWriter writer, XmppStanza stanza) throws XMLStreamException {
+        QName name = stanza.getName();
+        String namespace = name.getNamespaceURI();
+        String localName = name.getLocalPart();
+        String prefix = name.getPrefix();
+
+        // Start element with namespace handling
+        if (namespace != null && !namespace.isEmpty()) {
+            if (prefix != null && !prefix.isEmpty()) {
+                writer.writeStartElement(prefix, localName, namespace);
+            } else {
+                // Use default namespace
+                writer.writeStartElement(localName);
+                writer.writeDefaultNamespace(namespace);
+            }
+        } else {
+            writer.writeStartElement(localName);
+        }
+
+        // Write namespace declarations if needed (only for prefixed namespaces)
+        if (namespace != null && !namespace.isEmpty() && prefix != null && !prefix.isEmpty()) {
+            writer.writeNamespace(prefix, namespace);
+        }
+
+        // Write attributes
+        for (java.util.Map.Entry<String, String> attr : stanza.getAttributes().entrySet()) {
+            writer.writeAttribute(attr.getKey(), attr.getValue());
+        }
+
+        // Write text content if present
+        if (stanza.getTextContent() != null && !stanza.getTextContent().trim().isEmpty()) {
+            writer.writeCharacters(stanza.getTextContent());
+        }
+
+        // Write children
+        for (XmppStanza child : stanza.getChildren()) {
+            writeStanzaElement(writer, child);
+        }
+
+        writer.writeEndElement();
+    }
+
 }
