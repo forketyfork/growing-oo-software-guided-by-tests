@@ -149,7 +149,7 @@ The `SimpleXmppServer` is a lightweight XMPP server that:
 ### 4. Implementation Priority
 
 #### Phase 1: Critical Fixes (Immediate)
-1. [x] **Add proper XML parsing** - Replace string.contains() with XML parser
+1. **Add proper XML parsing** - Replace string.contains() with XML parser
 2. **Improve error handling** - Add try-catch blocks and proper cleanup
 3. **Add logging** - Basic logging for debugging test failures
 4. **Fix resource cleanup** - Ensure all sockets and threads are properly closed
