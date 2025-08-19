@@ -22,7 +22,8 @@ public class ApplicationRunner {
         thread.setDaemon(true);
         thread.start();
         driver = new AuctionSniperDriver(1000);
-        driver.showsSniperStatus(MainWindow.STATUS_JOINING);
+        // TODO enable after implementing the UI
+        // driver.showsSniperStatus(MainWindow.STATUS_JOINING);
     }
 
     public void showsSniperHasLostAuction() {
@@ -31,7 +32,8 @@ public class ApplicationRunner {
 
     public void stop() {
         if (driver != null) {
-            driver.dispose();
+            // TODO enable after implementing the UI
+            // driver.dispose();
         }
     }
 }

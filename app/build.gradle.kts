@@ -9,6 +9,9 @@ repositories {
 dependencies {
     testImplementation(libs.windowlicker)
     testImplementation(libs.smack)
+    testImplementation(libs.smack.tcp)
+    testImplementation(libs.smack.im)
+    testImplementation(libs.smack.extensions)
 }
 
 testing {
