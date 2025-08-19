@@ -14,10 +14,7 @@
             {
                 devShells.default = pkgs.mkShell {
                     buildInputs = with pkgs; [
-                        stabber
                         jdk21
-                        (writeShellScriptBin "stabber-up" "stabber -p 5222 -h 5223 -l DEBUG &")
-                        (writeShellScriptBin "stabber-down" "pkill stabber")
                     ];
                     
                     shellHook = ''
@@ -26,9 +23,6 @@
                       echo "🚀 Growing OO Software dev environment ready"
                       echo "   Java version: $(java -version 2>&1 | head -1)"
                       echo "   Gradle version: $(gradle --version | grep Gradle)"
-                      echo ""
-                      echo "📋 Available commands:"
-                      echo "   stabber-up/stabber-down - manage stabber"
                     '';
                 };
             });
