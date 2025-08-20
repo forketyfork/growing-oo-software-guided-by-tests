@@ -6,5 +6,5 @@ public class MainWindow {
     public static final String SNIPER_STATUS_NAME = "Status";
 
 
-    public static final String MAIN_WINDOW_NAME = "Auction Sniper";
+    public static final String MAIN_WINDOW_NAME = "Auction Sniper Main";
 }

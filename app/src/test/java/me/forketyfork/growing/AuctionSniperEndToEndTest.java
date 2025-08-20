@@ -16,11 +16,9 @@ public class AuctionSniperEndToEndTest {
     public void sniperJoinsAuctionUntilAuctionCloses() throws Exception {
         auction.startSellingItem();
         application.startBiddingIn(auction);
-        // TODO enable after implementing the UI
-        // auction.hasReceivedJoinRequestFromSniper();
+        auction.hasReceivedJoinRequestFromSniper();
         auction.announceClosed();
-        // TODO enable after implementing the UI
-        // application.showsSniperHasLostAuction();
+        application.showsSniperHasLostAuction();
     }
 
     // Additional cleanup
