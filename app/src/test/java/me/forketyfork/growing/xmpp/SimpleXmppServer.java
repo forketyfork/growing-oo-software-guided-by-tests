@@ -1,6 +1,4 @@
-package me.forketyfork.growing;
-
-import me.forketyfork.growing.xmpp.*;
+package me.forketyfork.growing.xmpp;
 
 import javax.xml.namespace.QName;
 import javax.xml.stream.*;

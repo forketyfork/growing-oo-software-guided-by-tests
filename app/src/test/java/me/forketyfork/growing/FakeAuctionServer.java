@@ -1,5 +1,6 @@
 package me.forketyfork.growing;
 
+import me.forketyfork.growing.xmpp.SimpleXmppServer;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
 import org.jivesoftware.smack.XMPPException;
