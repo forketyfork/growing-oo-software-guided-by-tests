@@ -1,33 +1,33 @@
 package me.forketyfork.growing;
 
-import org.w3c.dom.Document;
-import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-
 import javax.xml.namespace.QName;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamConstants;
-import javax.xml.stream.XMLStreamException;
-import javax.xml.stream.XMLStreamReader;
-import java.io.*;
+import javax.xml.stream.*;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * A minimal XMPP server that supports Smack 4.5+ authentication flow.
  * Supports SASL PLAIN authentication and basic IQ handling.
- * Uses streaming XML parser for performance and proper namespace handling.
+ * Uses streaming XML parser/writer for proper event-driven XML processing.
  */
 @SuppressWarnings("HttpUrlsUsage")
 public class SimpleXmppServer {
+
+    private final Logger logger = Logger.getLogger("SimpleXmppServer");
+
+
     private final int port;
     private ServerSocket serverSocket;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -44,6 +44,15 @@ public class SimpleXmppServer {
 
     private final Set<Socket> openClients = Collections.synchronizedSet(new HashSet<>());
 
+    // Client state for XMPP flow
+    private enum ClientState {
+        WAITING_FOR_STREAM_START,
+        WAITING_FOR_AUTH,
+        AUTHENTICATED_WAITING_FOR_RESTART,
+        PROCESSING_STANZAS,
+        CLOSED
+    }
+
     public SimpleXmppServer(int port) {
         this.port = port;
     }
@@ -58,7 +67,7 @@ public class SimpleXmppServer {
                     openClients.add(socket);
                     clients.submit(() -> handleClient(socket));
                 } catch (IOException e) {
-                    e.printStackTrace();
+                    logger.log(Level.WARNING, "IOException occurred during socket processing", e);
                 }
             }
         });
@@ -68,13 +77,15 @@ public class SimpleXmppServer {
         if (!running.getAndSet(false)) return;
         try {
             if (serverSocket != null) serverSocket.close();
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            logger.log(Level.WARNING, "IOException occurred on closing the server socket", e);
         }
         synchronized (openClients) {
             for (Socket s : openClients) {
                 try {
                     s.close();
-                } catch (IOException ignored) {
+                } catch (IOException e) {
+                    logger.log(Level.WARNING, "IOException occurred on closing the open clients", e);
                 }
             }
             openClients.clear();
@@ -84,312 +95,277 @@ public class SimpleXmppServer {
     }
 
     private void handleClient(Socket socket) {
-        try (socket;
-             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-             BufferedWriter out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))) {
-
+        logger.info("Client connected");
+        try (socket) {
             socket.setSoTimeout(30000); // 30-second timeout
 
-            // Create XML factories for processing individual stanzas
+            // Create an XML input factory and output factory
             XMLInputFactory inputFactory = XMLInputFactory.newInstance();
             inputFactory.setProperty(XMLInputFactory.IS_NAMESPACE_AWARE, Boolean.TRUE);
             inputFactory.setProperty(XMLInputFactory.IS_COALESCING, Boolean.TRUE);
             inputFactory.setProperty(XMLInputFactory.SUPPORT_DTD, Boolean.FALSE);
             inputFactory.setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, Boolean.FALSE);
 
-            boolean authenticated = false;
+            XMLOutputFactory outputFactory = XMLOutputFactory.newInstance();
 
-            // Main client handling loop (similar to the original but with streaming XML for stanzas)
-            while (!socket.isClosed() && running.get()) {
-                // Wait for stream header using original string-based approach
-                if (!handleStreamHeader(in, out, authenticated)) {
-                    break; // Connection closed or error
-                }
+            // Create a streaming XML reader and writer for this client
+            XMLStreamReader xmlReader = inputFactory.createXMLStreamReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            XMLStreamWriter xmlWriter = outputFactory.createXMLStreamWriter(
+                    new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8));
 
-                // Process stanzas until stream restart or connection close
-                StringBuilder buffer = new StringBuilder();
-                int ch;
-                while ((ch = in.read()) != -1) {
-                    buffer.append((char) ch);
+            ClientState state = ClientState.WAITING_FOR_STREAM_START;
 
-                    String currentData = buffer.toString();
-
-                    // Check for stream close
-                    if (currentData.contains("</stream:stream>")) {
-                        // Client is closing stream, send closing stream tag and break
-                        out.write("</stream:stream>");
-                        out.flush();
-                        return; // End connection
-                    }
-
-                    // Check for stream restart
-                    if (currentData.contains("<stream:stream") && buffer.length() > 50) {
-                        // Stream restart detected, break to outer loop
+            // Event-driven XML processing loop
+            while (!socket.isClosed() && running.get() && state != ClientState.CLOSED) {
+                try {
+                    if (!xmlReader.hasNext()) {
                         break;
                     }
 
-                    // Try to extract and process complete stanzas using streaming XML
-                    String processedData = processStanzasWithXmlStreaming(buffer.toString(), out, inputFactory);
-                    if (!processedData.contentEquals(buffer)) {
-                        // Some stanzas were processed, check if we need to authenticate/restart
-                        if (processedData.contains("SASL_SUCCESS")) {
-                            authenticated = true;
-                            buffer.setLength(0);
-                            break; // Stream will restart
-                        }
-                        // Reset buffer with any remaining unprocessed data
-                        buffer.setLength(0);
-                        buffer.append(processedData);
-                    }
-                }
+                    int event = xmlReader.next();
+                    state = processXmlEvent(xmlReader, xmlWriter, event, state);
 
-                if (ch == -1) break; // Connection closed
+                } catch (XMLStreamException e) {
+                    // Connection closed or malformed XML
+                    break;
+                }
             }
 
-        } catch (IOException ignored) {
+            xmlWriter.close();
+            xmlReader.close();
+
+        } catch (IOException | XMLStreamException ignored) {
             // Client disconnected or server stopping
         } finally {
             openClients.remove(socket);
         }
     }
 
-    private boolean handleStreamHeader(BufferedReader in, BufferedWriter out, boolean authenticated) throws IOException {
-        StringBuilder buffer = new StringBuilder();
-        int ch;
-
-        // Read until we get a stream header
-        while ((ch = in.read()) != -1) {
-            buffer.append((char) ch);
-            if (buffer.toString().contains("<stream:stream")) {
-                break;
-            }
-        }
-
-        if (ch == -1) return false; // Connection closed
-
-        // Send stream response
-        String streamResponse = "<?xml version='1.0'?>" +
-                "<stream:stream from='localhost' id='test-" + System.currentTimeMillis() +
-                "' version='1.0' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams'>";
-        out.write(streamResponse);
-        out.flush();
-
-        // Send appropriate features
-        String features = getFeatures(authenticated);
-
-        out.write(features);
-        out.flush();
-
-        return true;
+    private String getXmlEventName(int event) {
+        return switch (event) {
+            case XMLStreamConstants.START_ELEMENT -> "START_ELEMENT";
+            case XMLStreamConstants.END_ELEMENT -> "END_ELEMENT";
+            case XMLStreamConstants.PROCESSING_INSTRUCTION -> "PROCESSING_INSTRUCTION";
+            case XMLStreamConstants.CHARACTERS -> "CHARACTERS";
+            case XMLStreamConstants.COMMENT -> "COMMENT";
+            case XMLStreamConstants.SPACE -> "SPACE";
+            case XMLStreamConstants.START_DOCUMENT -> "START_DOCUMENT";
+            case XMLStreamConstants.END_DOCUMENT -> "END_DOCUMENT";
+            case XMLStreamConstants.ENTITY_REFERENCE -> "ENTITY_REFERENCE";
+            case XMLStreamConstants.ATTRIBUTE -> "ATTRIBUTE";
+            case XMLStreamConstants.DTD -> "DTD";
+            case XMLStreamConstants.CDATA -> "CDATA";
+            case XMLStreamConstants.NAMESPACE -> "NAMESPACE";
+            case XMLStreamConstants.NOTATION_DECLARATION -> "NOTATION_DECLARATION";
+            case XMLStreamConstants.ENTITY_DECLARATION -> "ENTITY_DECLARATION";
+            default -> "UNKNOWN_EVENT_TYPE";
+        };
     }
 
-    private static String getFeatures(boolean authenticated) {
-        String features;
-        if (!authenticated) {
-            features = "<stream:features>" +
-                    "<mechanisms xmlns='urn:ietf:params:xml:ns:xmpp-sasl'>" +
-                    "<mechanism>PLAIN</mechanism>" +
-                    "</mechanisms>" +
-                    "</stream:features>";
-        } else {
-            features = "<stream:features>" +
-                    "<compression xmlns='http://jabber.org/features/compress'>" +
-                    "<method>zlib</method>" +
-                    "</compression>" +
-                    "<bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'/>" +
-                    "<session xmlns='urn:ietf:params:xml:ns:xmpp-session'/>" +
-                    "</stream:features>";
-        }
-        return features;
+    private ClientState processXmlEvent(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
+                                        int event, ClientState currentState) throws XMLStreamException {
+
+        logger.log(Level.FINE, "XML Event: {0}, currentState: {1}", new Object[]{getXmlEventName(event), currentState});
+
+        return switch (event) {
+            case XMLStreamConstants.START_ELEMENT -> handleStartElement(xmlReader, xmlWriter, currentState);
+            case XMLStreamConstants.END_ELEMENT -> handleEndElement(xmlReader, xmlWriter, currentState);
+            default -> currentState;
+        };
     }
 
-    private String processStanzasWithXmlStreaming(String data, BufferedWriter out, XMLInputFactory inputFactory) throws IOException {
-        // Handle SASL auth
-        String authStanza = extractCompleteStanza(data, "auth");
-        if (authStanza != null) {
-            try {
-                XmlStanza stanza = parseStanzaFromString(authStanza, inputFactory);
-                if ("urn:ietf:params:xml:ns:xmpp-sasl".equals(stanza.name.getNamespaceURI())) {
-                    out.write("<success xmlns='urn:ietf:params:xml:ns:xmpp-sasl'/>");
-                    out.flush();
-                    return "SASL_SUCCESS"; // Special marker for stream restart
-                }
-            } catch (Exception e) {
-                // Parsing failed, fall back to original behavior
-            }
+    private ClientState handleStartElement(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
+                                           ClientState currentState) throws XMLStreamException {
+        QName elementName = xmlReader.getName();
+        logger.log(Level.FINE, "Handling start element: {0}, currentState: {1}", new Object[]{elementName, currentState});
+        String localName = elementName.getLocalPart();
+        String namespace = elementName.getNamespaceURI();
+
+        // Handle stream start
+        if ("stream".equals(localName) && "http://etherx.jabber.org/streams".equals(namespace)) {
+            return handleStreamStart(xmlWriter, currentState);
+        }
+
+        // Handle authentication
+        if ("auth".equals(localName) && "urn:ietf:params:xml:ns:xmpp-sasl".equals(namespace)) {
+            return handleSaslAuth(xmlReader, xmlWriter, currentState);
         }
 
         // Handle IQ stanzas
-        String iqStanza = extractCompleteStanza(data, "iq");
-        if (iqStanza != null) {
-            try {
-                // Convert to DOM for compatibility with existing IQ handling logic
-                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                factory.setNamespaceAware(true);
-                DocumentBuilder builder = factory.newDocumentBuilder();
-                Document doc = builder.parse(new InputSource(new StringReader(iqStanza)));
-                Element iqEl = doc.getDocumentElement();
-                String response = handleIq(iqEl);
-                if (response != null) {
-                    out.write(response);
-                    out.flush();
-                }
-
-                // Return remaining data after this stanza
-                int startPos = data.indexOf(iqStanza);
-                int endPos = startPos + iqStanza.length();
-                String remaining = data.substring(0, startPos) + data.substring(endPos);
-                return remaining.trim().isEmpty() ? "" : remaining;
-
-            } catch (Exception e) {
-                // Parsing failed, return original data
-            }
+        if ("iq".equals(localName) && "jabber:client".equals(namespace)) {
+            return handleIqStanza(xmlReader, xmlWriter, currentState);
         }
 
-        // No complete stanzas found, return original data
-        return data;
+        return currentState;
     }
 
-    private String extractCompleteStanza(String data, String tagName) {
-        // Look for the complete stanza using simple string searching
-        int currentPos = 0;
+    private ClientState handleEndElement(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
+                                         ClientState currentState) throws XMLStreamException {
+        QName elementName = xmlReader.getName();
+        logger.log(Level.FINE, "Handling end element: {0}, currentState: {1}", new Object[]{elementName, currentState});
 
-        // Find opening tag
-        while (currentPos < data.length()) {
-            int tagStart = data.indexOf('<' + tagName + ' ', currentPos);
-            int tagStartNoSpace = data.indexOf('<' + tagName + '>', currentPos);
-            int tagStartSelfClose = data.indexOf('<' + tagName + "/>");
+        String localName = elementName.getLocalPart();
+        String namespace = elementName.getNamespaceURI();
 
-            if (tagStartSelfClose != -1 && (tagStart == -1 || tagStartSelfClose < tagStart) &&
-                    (tagStartNoSpace == -1 || tagStartSelfClose < tagStartNoSpace)) {
-                // Self-closing tag found
-                int endPos = tagStartSelfClose + tagName.length() + 3;
-                return data.substring(tagStartSelfClose, endPos);
-            }
+        // Handle stream end
+        if ("stream".equals(localName) && "http://etherx.jabber.org/streams".equals(namespace)) {
+            xmlWriter.writeEndElement(); // Close our stream
+            xmlWriter.flush();
+            return ClientState.CLOSED;
+        }
 
-            int openStart = tagStart != -1 ? tagStart : tagStartNoSpace;
-            if (openStart == -1) break;
+        return currentState;
+    }
 
-            int openEnd = data.indexOf('>', openStart);
-            if (openEnd == -1) break;
+    private ClientState handleStreamStart(XMLStreamWriter xmlWriter, ClientState currentState) throws XMLStreamException {
+        logger.log(Level.FINE, "Stream start, currentState: {0}", currentState);
 
-            // Look for the closing tag
-            String closeTag = "</" + tagName + ">";
-            int closePos = data.indexOf(closeTag, openEnd);
-            if (closePos == -1) {
-                // Try with the namespace prefix (simplified)
-                String nsClosePattern = ":" + tagName + ">";
-                int nsClosePos = data.indexOf(nsClosePattern, openEnd);
-                if (nsClosePos != -1) {
-                    // Find the actual start of the closing tag
-                    int nsCloseStart = data.lastIndexOf('<', nsClosePos);
-                    if (nsCloseStart != -1) {
-                        int nsCloseEnd = data.indexOf('>', nsClosePos);
-                        if (nsCloseEnd != -1) {
-                            return data.substring(openStart, nsCloseEnd + 1);
-                        }
-                    }
-                }
+        // Send XML declaration and stream header
+        xmlWriter.writeStartDocument("UTF-8", "1.0");
+        xmlWriter.writeStartElement("stream", "stream", "http://etherx.jabber.org/streams");
+        xmlWriter.writeAttribute("from", "localhost");
+        xmlWriter.writeAttribute("id", "test-" + System.currentTimeMillis());
+        xmlWriter.writeAttribute("version", "1.0");
+        xmlWriter.writeDefaultNamespace("jabber:client");
+        xmlWriter.writeNamespace("stream", "http://etherx.jabber.org/streams");
+
+        // Send features based on the current state
+        if (currentState == ClientState.WAITING_FOR_STREAM_START) {
+            sendSaslFeatures(xmlWriter);
+            return ClientState.WAITING_FOR_AUTH;
+        } else if (currentState == ClientState.AUTHENTICATED_WAITING_FOR_RESTART) {
+            sendBindFeatures(xmlWriter);
+            return ClientState.PROCESSING_STANZAS;
+        }
+
+        xmlWriter.flush();
+        return currentState;
+    }
+
+    private void sendSaslFeatures(XMLStreamWriter xmlWriter) throws XMLStreamException {
+        xmlWriter.writeStartElement("stream", "features", "http://etherx.jabber.org/streams");
+        xmlWriter.writeStartElement("mechanisms");
+        xmlWriter.writeAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
+        xmlWriter.writeStartElement("mechanism");
+        xmlWriter.writeCharacters("PLAIN");
+        xmlWriter.writeEndElement(); // mechanism
+        xmlWriter.writeEndElement(); // mechanisms
+        xmlWriter.writeEndElement(); // features
+        xmlWriter.flush();
+    }
+
+    private void sendBindFeatures(XMLStreamWriter xmlWriter) throws XMLStreamException {
+        xmlWriter.writeStartElement("stream", "features", "http://etherx.jabber.org/streams");
+        xmlWriter.writeStartElement("compression");
+        xmlWriter.writeAttribute("xmlns", "http://jabber.org/features/compress");
+        xmlWriter.writeStartElement("method");
+        xmlWriter.writeCharacters("zlib");
+        xmlWriter.writeEndElement(); // method
+        xmlWriter.writeEndElement(); // compression
+        xmlWriter.writeEmptyElement("bind");
+        xmlWriter.writeAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-bind");
+        xmlWriter.writeEmptyElement("session");
+        xmlWriter.writeAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-session");
+        xmlWriter.writeEndElement(); // features
+        xmlWriter.flush();
+    }
+
+    private ClientState handleSaslAuth(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
+                                       ClientState currentState) throws XMLStreamException {
+        logger.log(Level.FINE, "Handling SASL Auth, currentState: {0}", currentState);
+
+        // Read the auth content (we don't need to validate it for this test server)
+        StringBuilder authContent = new StringBuilder();
+        while (xmlReader.hasNext()) {
+            int event = xmlReader.next();
+            if (event == XMLStreamConstants.CHARACTERS) {
+                authContent.append(xmlReader.getText());
+            } else if (event == XMLStreamConstants.END_ELEMENT &&
+                    "auth".equals(xmlReader.getName().getLocalPart())) {
                 break;
-            } else {
-                return data.substring(openStart, closePos + closeTag.length());
             }
         }
 
-        return null;
+        logger.log(Level.FINE, "Received SASL Auth: {0}, sending auth success", authContent);
+
+        // Send SASL success
+        xmlWriter.writeStartElement("success");
+        xmlWriter.writeAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-sasl");
+        xmlWriter.writeEndElement();
+        xmlWriter.flush();
+        return ClientState.AUTHENTICATED_WAITING_FOR_RESTART;
     }
 
-    private XmlStanza parseStanzaFromString(String xml, XMLInputFactory inputFactory) throws XMLStreamException {
-        XMLStreamReader xmlReader = inputFactory.createXMLStreamReader(new StringReader(xml));
+    private ClientState handleIqStanza(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
+                                       ClientState currentState) throws XMLStreamException {
+        logger.log(Level.FINE, "Handling IQ Stanza, currentState: {0}", currentState);
 
-        // Move to the start element
-        while (xmlReader.hasNext() && xmlReader.getEventType() != XMLStreamConstants.START_ELEMENT) {
-            xmlReader.next();
-        }
-
-        if (xmlReader.getEventType() == XMLStreamConstants.START_ELEMENT) {
-            return parseStanza(xmlReader, xmlReader.getName());
-        }
-
-        throw new XMLStreamException("No start element found");
-    }
-
-    private String handleIq(Element iq) {
-        String type = iq.getAttribute("type");
-        String id = iq.getAttribute("id");
+        // Read IQ attributes
+        String type = xmlReader.getAttributeValue(null, "type");
+        String id = xmlReader.getAttributeValue(null, "id");
         if (id == null || id.isEmpty()) id = "response";
 
-        // Look for queries
-        NodeList queries = iq.getElementsByTagNameNS("*", "query");
-        if (queries.getLength() > 0) {
-            Element query = (Element) queries.item(0);
-            String ns = query.getNamespaceURI();
+        // Parse the IQ content
+        String queryNs = null;
+        boolean hasBind = false;
 
-            if ("jabber:iq:auth".equals(ns)) {
-                if ("get".equals(type)) {
-                    return "<iq type='result' id='" + id + "'>" +
-                            "<query xmlns='jabber:iq:auth'><username/><password/><resource/></query>" +
-                            "</iq>";
-                } else if ("set".equals(type)) {
-                    return "<iq type='result' id='" + id + "'/>";
+        // Read the IQ content
+        while (xmlReader.hasNext()) {
+            int event = xmlReader.next();
+            if (event == XMLStreamConstants.START_ELEMENT) {
+                QName elementName = xmlReader.getName();
+                String localName = elementName.getLocalPart();
+                String namespace = elementName.getNamespaceURI();
+
+                if ("query".equals(localName)) {
+                    queryNs = namespace;
+                } else if ("bind".equals(localName) && "urn:ietf:params:xml:ns:xmpp-bind".equals(namespace)) {
+                    hasBind = true;
                 }
-            } else if ("jabber:iq:roster".equals(ns) && "get".equals(type)) {
-                return "<iq type='result' id='" + id + "'><query xmlns='jabber:iq:roster'/></iq>";
-            }
-        }
-
-        // Look for bind
-        NodeList binds = iq.getElementsByTagNameNS("urn:ietf:params:xml:ns:xmpp-bind", "bind");
-        if (binds.getLength() > 0 && "set".equals(type)) {
-            return "<iq type='result' id='" + id + "'>" +
-                    "<bind xmlns='urn:ietf:params:xml:ns:xmpp-bind'>" +
-                    "<jid>test@localhost/resource</jid>" +
-                    "</bind></iq>";
-        }
-
-        // Look for session
-        NodeList sessions = iq.getElementsByTagNameNS("urn:ietf:params:xml:ns:xmpp-session", "session");
-        if (sessions.getLength() > 0 && "set".equals(type)) {
-            return "<iq type='result' id='" + id + "'/>";
-        }
-
-        // Default response for get queries
-        if ("get".equals(type)) {
-            return "<iq type='result' id='" + id + "'/>";
-        }
-
-        return null;
-    }
-
-    // Data class to hold parsed stanza information
-    private record XmlStanza(QName name, Map<String, String> attributes, String textContent, List<Element> children) {
-    }
-
-    private XmlStanza parseStanza(XMLStreamReader xmlIn, QName elementName) throws XMLStreamException {
-        java.util.Map<String, String> attributes = new java.util.HashMap<>();
-
-        // Read attributes
-        for (int i = 0; i < xmlIn.getAttributeCount(); i++) {
-            attributes.put(xmlIn.getAttributeLocalName(i), xmlIn.getAttributeValue(i));
-        }
-
-        StringBuilder textContent = new StringBuilder();
-        java.util.List<Element> children = new java.util.ArrayList<>();
-
-        while (xmlIn.hasNext()) {
-            int event = xmlIn.next();
-
-            if (event == XMLStreamConstants.CHARACTERS) {
-                textContent.append(xmlIn.getText());
             } else if (event == XMLStreamConstants.END_ELEMENT) {
-                QName endName = xmlIn.getName();
-                if (endName.equals(elementName)) {
+                if ("iq".equals(xmlReader.getName().getLocalPart())) {
                     break;
                 }
             }
         }
 
-        return new XmlStanza(elementName, attributes, textContent.toString().trim(), children);
+        // Generate response
+        sendIqResponse(xmlWriter, type, id, queryNs, hasBind);
+        return currentState;
+    }
+
+    private void sendIqResponse(XMLStreamWriter xmlWriter, String type, String id, String queryNs,
+                                boolean hasBind) throws XMLStreamException {
+        xmlWriter.writeStartElement("iq");
+        xmlWriter.writeAttribute("type", "result");
+        xmlWriter.writeAttribute("id", id);
+
+        if (queryNs != null) {
+            if ("jabber:iq:auth".equals(queryNs)) {
+                if ("get".equals(type)) {
+                    xmlWriter.writeStartElement("query");
+                    xmlWriter.writeAttribute("xmlns", "jabber:iq:auth");
+                    xmlWriter.writeEmptyElement("username");
+                    xmlWriter.writeEmptyElement("password");
+                    xmlWriter.writeEmptyElement("resource");
+                    xmlWriter.writeEndElement(); // query
+                }
+            } else if ("jabber:iq:roster".equals(queryNs) && "get".equals(type)) {
+                xmlWriter.writeEmptyElement("query");
+                xmlWriter.writeAttribute("xmlns", "jabber:iq:roster");
+            }
+        } else if (hasBind) {
+            xmlWriter.writeStartElement("bind");
+            xmlWriter.writeAttribute("xmlns", "urn:ietf:params:xml:ns:xmpp-bind");
+            xmlWriter.writeStartElement("jid");
+            xmlWriter.writeCharacters("test@localhost/resource");
+            xmlWriter.writeEndElement(); // jid
+            xmlWriter.writeEndElement(); // bind
+        }
+
+        xmlWriter.writeEndElement(); // iq
+        xmlWriter.flush();
     }
 
 }

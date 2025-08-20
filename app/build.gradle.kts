@@ -24,6 +24,15 @@ testing {
     }
 }
 
+// Configure JVM args for all tasks
+tasks.withType<JavaExec> {
+    systemProperty("java.util.logging.config.file", "src/main/resources/logging.properties")
+}
+
+tasks.withType<Test> {
+    systemProperty("java.util.logging.config.file", "src/main/resources/logging.properties")
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(21)
