@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * A minimal XMPP server that supports Smack 4.5+ authentication flow.
  * Supports SASL PLAIN authentication and basic IQ handling.
- * Uses streaming XML parser instead of regex-based parsing for proper namespace handling.
+ * Uses streaming XML parser for performance and proper namespace handling.
  */
 @SuppressWarnings("HttpUrlsUsage")
 public class SimpleXmppServer {
@@ -204,8 +204,6 @@ public class SimpleXmppServer {
     }
 
     private String processStanzasWithXmlStreaming(String data, BufferedWriter out, XMLInputFactory inputFactory) throws IOException {
-        // Look for complete stanzas using proper XML parsing instead of regex
-
         // Handle SASL auth
         String authStanza = extractCompleteStanza(data, "auth");
         if (authStanza != null) {
@@ -389,8 +387,6 @@ public class SimpleXmppServer {
                     break;
                 }
             }
-            // For simplicity, we're not parsing nested elements for now
-            // since the original implementation handled stanzas as strings
         }
 
         return new XmlStanza(elementName, attributes, textContent.toString().trim(), children);
