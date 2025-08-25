@@ -5,6 +5,7 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 import java.util.Base64;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -14,6 +15,11 @@ import java.util.logging.Logger;
 public class DefaultSaslHandler implements XmppSaslHandler {
     
     private final Logger logger = Logger.getLogger("DefaultSaslHandler");
+    private final Map<String, String> userCredentials;
+
+    public DefaultSaslHandler(Map<String, String> userCredentials) {
+        this.userCredentials = userCredentials == null ? Map.of() : userCredentials;
+    }
     
     @Override
     public ClientContext handleSaslAuth(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
@@ -31,50 +37,70 @@ public class DefaultSaslHandler implements XmppSaslHandler {
             }
         }
         
-        // Extract username from SASL PLAIN authentication
-        String username = extractUsernameFromSaslPlain(authContent.toString());
-        if (username != null) {
-            context.setUsername(username);
-            logger.log(Level.FINE, "Extracted username: {0}", username);
+        // Extract username and password from SASL PLAIN authentication
+        Credentials creds = extractCredentialsFromSaslPlain(authContent.toString());
+        if (creds != null) {
+            context.setUsername(creds.username);
+            logger.log(Level.FINE, "Extracted username: {0}", creds.username);
         }
-        
-        logger.log(Level.FINE, "Received SASL Auth: {0}, sending auth success", authContent);
-        
-        // Send SASL success
+
+        boolean authorized = creds != null;
+        if (authorized && !userCredentials.isEmpty()) {
+            String expectedPassword = userCredentials.get(creds.username);
+            authorized = expectedPassword != null && expectedPassword.equals(creds.password);
+        }
+
         XMLStreamWriter xmlWriter = context.getXmlWriter();
-        xmlWriter.writeStartElement("success");
-        xmlWriter.writeAttribute("xmlns", XmppServerConfig.NAMESPACE_SASL);
-        xmlWriter.writeEndElement();
-        xmlWriter.flush();
-        
-        context.setState(ClientState.AUTHENTICATED_WAITING_FOR_RESTART);
+        if (authorized) {
+            logger.log(Level.FINE, "Received SASL Auth: {0}, sending auth success", authContent);
+            xmlWriter.writeStartElement("success");
+            xmlWriter.writeAttribute("xmlns", XmppServerConfig.NAMESPACE_SASL);
+            xmlWriter.writeEndElement();
+            xmlWriter.flush();
+            context.setState(ClientState.AUTHENTICATED_WAITING_FOR_RESTART);
+        } else {
+            logger.log(Level.FINE, "Authentication failed for user {0}", creds == null ? "unknown" : creds.username);
+            xmlWriter.writeStartElement("failure");
+            xmlWriter.writeAttribute("xmlns", XmppServerConfig.NAMESPACE_SASL);
+            xmlWriter.writeEmptyElement("not-authorized");
+            xmlWriter.writeEndElement();
+            xmlWriter.flush();
+            context.setState(ClientState.CLOSED);
+        }
         return context;
     }
-    
-    /**
-     * Extract username from SASL PLAIN mechanism.
-     * SASL PLAIN format: base64([authzid] \0 authcid \0 password)
-     */
-    private String extractUsernameFromSaslPlain(String base64Auth) {
+
+    private Credentials extractCredentialsFromSaslPlain(String base64Auth) {
         try {
             if (base64Auth == null || base64Auth.trim().isEmpty()) {
                 return null;
             }
-            
+
             byte[] decoded = Base64.getDecoder().decode(base64Auth.trim());
             String plainText = new String(decoded);
-            
-            // Split by null character (\0)
+
             String[] parts = plainText.split("\0");
-            if (parts.length >= 2) {
-                // parts[0] is authzid (optional), parts[1] is username
-                return parts.length == 2 ? parts[0] : parts[1];
+            if (parts.length >= 3) {
+                // parts[0] is authzid (optional), parts[1] is username, parts[2] is password
+                return new Credentials(parts[parts.length - 2], parts[parts.length - 1]);
+            } else if (parts.length == 2) {
+                // username\0password
+                return new Credentials(parts[0], parts[1]);
             }
-            
             return null;
         } catch (Exception e) {
             logger.log(Level.WARNING, "Failed to parse SASL PLAIN auth", e);
             return null;
+        }
+    }
+
+    private static class Credentials {
+        final String username;
+        final String password;
+
+        Credentials(String username, String password) {
+            this.username = username;
+            this.password = password;
         }
     }
 }

@@ -61,7 +61,7 @@ public class SimpleXmppServer {
     public SimpleXmppServer(XmppServerConfig config) {
         this.config = config;
         this.streamHandler = new DefaultStreamHandler(config);
-        this.saslHandler = new DefaultSaslHandler();
+        this.saslHandler = new DefaultSaslHandler(config.userCredentials());
         this.iqHandler = new DefaultIqHandler(config.serverName());
         this.messageHandler = new DefaultMessageHandler();
     }

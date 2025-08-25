@@ -41,7 +41,7 @@ public class FakeAuctionServer {
     }
 
     public void startSellingItem() throws XMPPException, SmackException, IOException, InterruptedException {
-        ensureServerStarted();
+        ensureServerStarted(itemId);
         connection.connect();
         connection.login(String.format(ITEM_ID_AS_LOGIN, itemId), AUCTION_PASSWORD, Resourcepart.from(AUCTION_RESOURCE));
         var chatManager = ChatManager.getInstanceFor(connection);
@@ -49,10 +49,18 @@ public class FakeAuctionServer {
         // Don't create a chat - wait for the sniper to initiate communication
     }
 
-    private static synchronized void ensureServerStarted() {
+    private static synchronized void ensureServerStarted(String itemId) {
         if (embeddedServer == null) {
-            // Use shorter timeout for testing to allow faster message processing
-            embeddedServer = new SimpleXmppServer(new XmppServerConfig(5222, "localhost", 1000, 5000, 100));
+            XmppServerConfig config = XmppServerConfig.builder()
+                    .port(5222)
+                    .serverName(XMPP_HOSTNAME)
+                    .socketTimeoutMs(1000)
+                    .shutdownTimeoutMs(5000)
+                    .maxConnections(100)
+                    .addUser(String.format(ITEM_ID_AS_LOGIN, itemId), AUCTION_PASSWORD)
+                    .addUser(ApplicationRunner.SNIPER_ID, ApplicationRunner.SNIPER_PASSWORD)
+                    .build();
+            embeddedServer = new SimpleXmppServer(config);
             try {
                 embeddedServer.start();
             } catch (IOException e) {

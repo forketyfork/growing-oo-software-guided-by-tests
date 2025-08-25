@@ -1,5 +1,9 @@
 package me.forketyfork.growing.xmpp;
 
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
 /**
  * Configuration class for the SimpleXmppServer.
  */
@@ -9,7 +13,8 @@ public record XmppServerConfig(
         String serverName,
         int socketTimeoutMs,
         int shutdownTimeoutMs,
-        int maxConnections
+        int maxConnections,
+        Map<String, String> userCredentials
 ) {
 
     public static final String DEFAULT_SERVER_NAME = "localhost";
@@ -34,7 +39,8 @@ public record XmppServerConfig(
      */
     public XmppServerConfig(int port) {
         this(port, DEFAULT_SERVER_NAME, DEFAULT_SOCKET_TIMEOUT_MS,
-                DEFAULT_SHUTDOWN_TIMEOUT_MS, DEFAULT_MAX_CONNECTIONS);
+                DEFAULT_SHUTDOWN_TIMEOUT_MS, DEFAULT_MAX_CONNECTIONS,
+                Collections.emptyMap());
     }
 
     /**
@@ -48,7 +54,8 @@ public record XmppServerConfig(
      * @throws IllegalArgumentException if any parameter is invalid
      */
     public XmppServerConfig(int port, String serverName, int socketTimeoutMs,
-                            int shutdownTimeoutMs, int maxConnections) {
+                            int shutdownTimeoutMs, int maxConnections,
+                            Map<String, String> userCredentials) {
         if (port <= 0 || port > 65535) {
             throw new IllegalArgumentException("Port must be between 1 and 65535, got: " + port);
         }
@@ -64,12 +71,16 @@ public record XmppServerConfig(
         if (maxConnections <= 0) {
             throw new IllegalArgumentException("Max connections must be positive, got: " + maxConnections);
         }
+        Map<String, String> creds = userCredentials == null
+                ? Collections.emptyMap()
+                : Collections.unmodifiableMap(new HashMap<>(userCredentials));
 
         this.port = port;
         this.serverName = serverName.trim();
         this.socketTimeoutMs = socketTimeoutMs;
         this.shutdownTimeoutMs = shutdownTimeoutMs;
         this.maxConnections = maxConnections;
+        this.userCredentials = creds;
     }
 
     /**
@@ -110,5 +121,69 @@ public record XmppServerConfig(
     @Override
     public int maxConnections() {
         return maxConnections;
+    }
+
+    /**
+     * @return immutable map of allowed user credentials
+     */
+    @Override
+    public Map<String, String> userCredentials() {
+        return userCredentials;
+    }
+
+    /**
+     * Builder for {@link XmppServerConfig}.
+     */
+    public static class Builder {
+        private int port;
+        private String serverName = DEFAULT_SERVER_NAME;
+        private int socketTimeoutMs = DEFAULT_SOCKET_TIMEOUT_MS;
+        private int shutdownTimeoutMs = DEFAULT_SHUTDOWN_TIMEOUT_MS;
+        private int maxConnections = DEFAULT_MAX_CONNECTIONS;
+        private final Map<String, String> users = new HashMap<>();
+
+        public Builder port(int port) {
+            this.port = port;
+            return this;
+        }
+
+        public Builder serverName(String serverName) {
+            this.serverName = serverName;
+            return this;
+        }
+
+        public Builder socketTimeoutMs(int socketTimeoutMs) {
+            this.socketTimeoutMs = socketTimeoutMs;
+            return this;
+        }
+
+        public Builder shutdownTimeoutMs(int shutdownTimeoutMs) {
+            this.shutdownTimeoutMs = shutdownTimeoutMs;
+            return this;
+        }
+
+        public Builder maxConnections(int maxConnections) {
+            this.maxConnections = maxConnections;
+            return this;
+        }
+
+        public Builder addUser(String username, String password) {
+            if (username != null && password != null) {
+                users.put(username, password);
+            }
+            return this;
+        }
+
+        public XmppServerConfig build() {
+            return new XmppServerConfig(port, serverName, socketTimeoutMs,
+                    shutdownTimeoutMs, maxConnections, users);
+        }
+    }
+
+    /**
+     * Create a builder for the configuration.
+     */
+    public static Builder builder() {
+        return new Builder();
     }
 }
