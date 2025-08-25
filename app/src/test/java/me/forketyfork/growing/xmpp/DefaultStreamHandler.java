@@ -55,8 +55,11 @@ public class DefaultStreamHandler implements XmppStreamHandler {
         // xmlReader currently isn't used but may be needed for future stream validation
         logger.log(Level.FINE, "Handling stream end, currentState: {0}", context.getState());
         XMLStreamWriter xmlWriter = context.getXmlWriter();
-        xmlWriter.writeEndElement(); // Close our stream
+        
+        xmlWriter.writeEndElement(); // Close the stream:stream element
+        xmlWriter.writeEndDocument(); // Close the XML document
         xmlWriter.flush();
+        
         context.setState(ClientState.CLOSED);
         return context;
     }

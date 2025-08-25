@@ -1,11 +1,9 @@
 package me.forketyfork.growing;
 
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.jxmpp.stringprep.XmppStringprepException;
 
-@Disabled("Requires a graphical environment")
 public class AuctionSniperEndToEndTest {
 
     private final FakeAuctionServer auction = new FakeAuctionServer("item-54321");

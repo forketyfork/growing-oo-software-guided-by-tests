@@ -75,11 +75,12 @@ public class ClientSession {
             }
             xmlWriter.writeAttribute("type", "chat");
 
-            if (message.body != null && !message.body.isEmpty()) {
-                xmlWriter.writeStartElement("jabber:client", "body");
+            // Always include a body element, even for empty messages
+            xmlWriter.writeStartElement("jabber:client", "body");
+            if (message.body != null) {
                 xmlWriter.writeCharacters(message.body);
-                xmlWriter.writeEndElement(); // body
             }
+            xmlWriter.writeEndElement(); // body
 
             xmlWriter.writeEndElement(); // message
             xmlWriter.flush();
