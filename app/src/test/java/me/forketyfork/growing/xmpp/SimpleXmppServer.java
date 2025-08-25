@@ -11,11 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
@@ -66,7 +62,7 @@ public class SimpleXmppServer {
         this.config = config;
         this.streamHandler = new DefaultStreamHandler(config);
         this.saslHandler = new DefaultSaslHandler();
-        this.iqHandler = new DefaultIqHandler();
+        this.iqHandler = new DefaultIqHandler(config.serverName());
         this.messageHandler = new DefaultMessageHandler();
     }
 
@@ -179,30 +175,69 @@ public class SimpleXmppServer {
                 try {
                     context = new ClientContext(ClientState.WAITING_FOR_STREAM_START, xmlWriter, clientRegistry);
 
-                    // Event-driven XML processing loop
+                    // Event-driven XML processing loop with periodic message processing
+                    long lastMessageCheck = System.currentTimeMillis();
                     while (!socket.isClosed() && running.get() && context.getState() != ClientState.CLOSED) {
                         try {
-                            if (!xmlReader.hasNext()) {
-                                break;
+                            boolean hasXmlEvent = xmlReader.hasNext();
+
+                            if (hasXmlEvent) {
+                                int event = xmlReader.next();
+                                context = processXmlEvent(xmlReader, context, event);
                             }
 
-                            int event = xmlReader.next();
-                            context = processXmlEvent(xmlReader, context, event);
+                            // Process pending messages for this client after XML events or periodically
+                            long currentTime = System.currentTimeMillis();
+                            if (context.getFullJid() != null && (hasXmlEvent || currentTime - lastMessageCheck > 100)) {
+                                ClientSession session = context.findClientSession(context.getFullJid());
+                                if (session != null && session.hasPendingMessages()) {
+                                    session.processPendingMessages();
+                                }
+                                lastMessageCheck = currentTime;
+                            }
+
+                            if (!hasXmlEvent) {
+                                // Brief sleep to avoid busy-waiting when no XML events are available
+                                logger.log(Level.INFO, "DEBUG: No XML events available for client {0}, sleeping",
+                                        context.getFullJid() != null ? context.getFullJid() : "unknown");
+                                Thread.sleep(10);
+                            }
 
                         } catch (XMLStreamException e) {
-                            // Connection closed or malformed XML
-                            logger.log(Level.FINE, "XML parsing error, closing connection", e);
+                            // Connection closed or malformed XML - but also handle socket timeouts
+                            if (e.getCause() instanceof java.net.SocketTimeoutException) {
+                                logger.log(Level.FINE, "Socket timeout while reading XML, checking for pending messages");
+                                // Socket timeout - use this opportunity to process pending messages
+                                if (context.getFullJid() != null) {
+                                    ClientSession session = context.findClientSession(context.getFullJid());
+                                    if (session != null && session.hasPendingMessages()) {
+                                        try {
+                                            session.processPendingMessages();
+                                        } catch (XMLStreamException processingException) {
+                                            logger.log(Level.WARNING, "Failed to process pending messages during timeout", processingException);
+                                        }
+                                    }
+                                }
+                                // Continue processing instead of breaking
+                                continue;
+                            } else {
+                                logger.log(Level.FINE, "XML parsing error, closing connection", e);
+                                break;
+                            }
+                        } catch (InterruptedException e) {
+                            // Thread interrupted, close connection
+                            Thread.currentThread().interrupt();
                             break;
                         }
                     }
                 } finally {
-                    // Remove client from registry on disconnect
+                    // Remove client from registry BEFORE closing resources to prevent routing race conditions
                     if (context != null && context.getFullJid() != null) {
                         clientRegistry.remove(context.getFullJid());
                         clientRegistry.remove(context.getBareJid());
                         logger.log(Level.INFO, "Removed client {0} from registry", context.getFullJid());
                     }
-                    
+
                     try {
                         if (xmlWriter != null) {
                             xmlWriter.close();
@@ -256,7 +291,7 @@ public class SimpleXmppServer {
     }
 
     private ClientContext processXmlEvent(XMLStreamReader xmlReader, ClientContext context,
-                                         int event) throws XMLStreamException {
+                                          int event) throws XMLStreamException {
 
         logger.log(Level.FINE, "XML Event: {0}, currentState: {1}", new Object[]{getXmlEventName(event), context.getState()});
 

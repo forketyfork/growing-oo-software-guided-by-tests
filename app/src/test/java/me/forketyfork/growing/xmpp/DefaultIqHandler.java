@@ -15,6 +15,11 @@ import java.util.logging.Logger;
 public class DefaultIqHandler implements XmppIqHandler {
     
     private final Logger logger = Logger.getLogger("DefaultIqHandler");
+    private final String serverName;
+    
+    public DefaultIqHandler(String serverName) {
+        this.serverName = serverName;
+    }
     
     @Override
     public ClientContext handleIqStanza(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
@@ -61,7 +66,7 @@ public class DefaultIqHandler implements XmppIqHandler {
                 resource = "resource-" + UUID.randomUUID().toString().substring(0, 8);
             }
             
-            String fullJid = context.getUsername() + "@localhost/" + resource;
+            String fullJid = context.getUsername() + "@" + serverName + "/" + resource;
             context.setFullJid(fullJid);
             
             // Register the client in the global registry

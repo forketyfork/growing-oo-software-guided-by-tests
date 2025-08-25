@@ -1,15 +1,14 @@
 package me.forketyfork.growing;
 
 import me.forketyfork.growing.xmpp.SimpleXmppServer;
+import me.forketyfork.growing.xmpp.XmppServerConfig;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
 import org.jivesoftware.smack.XMPPException;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
-import org.jivesoftware.smack.packet.Message;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
-import org.jxmpp.jid.impl.JidCreate;
 import org.jxmpp.jid.parts.Resourcepart;
 import org.jxmpp.stringprep.XmppStringprepException;
 
@@ -52,7 +51,8 @@ public class FakeAuctionServer {
 
     private static synchronized void ensureServerStarted() {
         if (embeddedServer == null) {
-            embeddedServer = new SimpleXmppServer(5222);
+            // Use shorter timeout for testing to allow faster message processing
+            embeddedServer = new SimpleXmppServer(new XmppServerConfig(5222, "localhost", 1000, 5000, 100));
             try {
                 embeddedServer.start();
             } catch (IOException e) {
