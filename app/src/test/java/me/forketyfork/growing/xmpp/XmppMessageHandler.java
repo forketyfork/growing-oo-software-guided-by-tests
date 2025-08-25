@@ -6,6 +6,5 @@ import javax.xml.stream.XMLStreamWriter;
 
 public interface XmppMessageHandler {
     
-    ClientState handleMessageStanza(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter, 
-                                   ClientState currentState) throws XMLStreamException;
+    ClientContext handleMessageStanza(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException;
 }

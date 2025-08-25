@@ -12,22 +12,18 @@ public interface XmppStreamHandler {
     /**
      * Handle stream start element.
      * @param xmlReader the XML stream reader
-     * @param xmlWriter the XML stream writer
-     * @param currentState the current client state
-     * @return the new client state
+     * @param context the client context containing state and connection info
+     * @return the updated client context
      * @throws XMLStreamException if XML processing fails
      */
-    ClientState handleStreamStart(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter, 
-                                  ClientState currentState) throws XMLStreamException;
+    ClientContext handleStreamStart(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException;
     
     /**
      * Handle stream end element.
      * @param xmlReader the XML stream reader
-     * @param xmlWriter the XML stream writer
-     * @param currentState the current client state
-     * @return the new client state
+     * @param context the client context containing state and connection info
+     * @return the updated client context
      * @throws XMLStreamException if XML processing fails
      */
-    ClientState handleStreamEnd(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter, 
-                               ClientState currentState) throws XMLStreamException;
+    ClientContext handleStreamEnd(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException;
 }

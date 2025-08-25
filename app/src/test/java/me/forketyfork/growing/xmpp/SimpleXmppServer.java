@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -47,6 +48,9 @@ public class SimpleXmppServer {
     });
 
     private final Set<Socket> openClients = Collections.synchronizedSet(new HashSet<>());
+
+    // Client session registry for message routing
+    private static final ConcurrentHashMap<String, ClientSession> clientRegistry = new ConcurrentHashMap<>();
 
     // Handler interfaces for extensibility
     private final XmppStreamHandler streamHandler;
@@ -171,18 +175,19 @@ public class SimpleXmppServer {
                 XMLStreamReader xmlReader = inputFactory.createXMLStreamReader(inputStreamReader);
                 XMLStreamWriter xmlWriter = outputFactory.createXMLStreamWriter(outputStreamWriter);
 
+                ClientContext context = null;
                 try {
-                    ClientState state = ClientState.WAITING_FOR_STREAM_START;
+                    context = new ClientContext(ClientState.WAITING_FOR_STREAM_START, xmlWriter, clientRegistry);
 
                     // Event-driven XML processing loop
-                    while (!socket.isClosed() && running.get() && state != ClientState.CLOSED) {
+                    while (!socket.isClosed() && running.get() && context.getState() != ClientState.CLOSED) {
                         try {
                             if (!xmlReader.hasNext()) {
                                 break;
                             }
 
                             int event = xmlReader.next();
-                            state = processXmlEvent(xmlReader, xmlWriter, event, state);
+                            context = processXmlEvent(xmlReader, context, event);
 
                         } catch (XMLStreamException e) {
                             // Connection closed or malformed XML
@@ -191,6 +196,13 @@ public class SimpleXmppServer {
                         }
                     }
                 } finally {
+                    // Remove client from registry on disconnect
+                    if (context != null && context.getFullJid() != null) {
+                        clientRegistry.remove(context.getFullJid());
+                        clientRegistry.remove(context.getBareJid());
+                        logger.log(Level.INFO, "Removed client {0} from registry", context.getFullJid());
+                    }
+                    
                     try {
                         if (xmlWriter != null) {
                             xmlWriter.close();
@@ -243,62 +255,60 @@ public class SimpleXmppServer {
         };
     }
 
-    private ClientState processXmlEvent(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
-                                        int event, ClientState currentState) throws XMLStreamException {
+    private ClientContext processXmlEvent(XMLStreamReader xmlReader, ClientContext context,
+                                         int event) throws XMLStreamException {
 
-        logger.log(Level.FINE, "XML Event: {0}, currentState: {1}", new Object[]{getXmlEventName(event), currentState});
+        logger.log(Level.FINE, "XML Event: {0}, currentState: {1}", new Object[]{getXmlEventName(event), context.getState()});
 
         return switch (event) {
-            case XMLStreamConstants.START_ELEMENT -> handleStartElement(xmlReader, xmlWriter, currentState);
-            case XMLStreamConstants.END_ELEMENT -> handleEndElement(xmlReader, xmlWriter, currentState);
-            default -> currentState;
+            case XMLStreamConstants.START_ELEMENT -> handleStartElement(xmlReader, context);
+            case XMLStreamConstants.END_ELEMENT -> handleEndElement(xmlReader, context);
+            default -> context;
         };
     }
 
-    private ClientState handleStartElement(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
-                                           ClientState currentState) throws XMLStreamException {
+    private ClientContext handleStartElement(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
         QName elementName = xmlReader.getName();
-        logger.log(Level.FINE, "Handling start element: {0}, currentState: {1}", new Object[]{elementName, currentState});
+        logger.log(Level.FINE, "Handling start element: {0}, currentState: {1}", new Object[]{elementName, context.getState()});
         String localName = elementName.getLocalPart();
         String namespace = elementName.getNamespaceURI();
 
         // Handle stream start
         if ("stream".equals(localName) && XmppServerConfig.NAMESPACE_STREAM.equals(namespace)) {
-            return streamHandler.handleStreamStart(xmlReader, xmlWriter, currentState);
+            return streamHandler.handleStreamStart(xmlReader, context);
         }
 
         // Handle authentication
         if ("auth".equals(localName) && XmppServerConfig.NAMESPACE_SASL.equals(namespace)) {
-            return saslHandler.handleSaslAuth(xmlReader, xmlWriter, currentState);
+            return saslHandler.handleSaslAuth(xmlReader, context);
         }
 
         // Handle IQ stanzas
         if ("iq".equals(localName) && XmppServerConfig.NAMESPACE_CLIENT.equals(namespace)) {
-            return iqHandler.handleIqStanza(xmlReader, xmlWriter, currentState);
+            return iqHandler.handleIqStanza(xmlReader, context);
         }
 
         // Handle message stanzas
         if ("message".equals(localName) && XmppServerConfig.NAMESPACE_CLIENT.equals(namespace)) {
-            return messageHandler.handleMessageStanza(xmlReader, xmlWriter, currentState);
+            return messageHandler.handleMessageStanza(xmlReader, context);
         }
 
-        return currentState;
+        return context;
     }
 
-    private ClientState handleEndElement(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter,
-                                         ClientState currentState) throws XMLStreamException {
+    private ClientContext handleEndElement(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
         QName elementName = xmlReader.getName();
-        logger.log(Level.FINE, "Handling end element: {0}, currentState: {1}", new Object[]{elementName, currentState});
+        logger.log(Level.FINE, "Handling end element: {0}, currentState: {1}", new Object[]{elementName, context.getState()});
 
         String localName = elementName.getLocalPart();
         String namespace = elementName.getNamespaceURI();
 
         // Handle stream end
         if ("stream".equals(localName) && XmppServerConfig.NAMESPACE_STREAM.equals(namespace)) {
-            return streamHandler.handleStreamEnd(xmlReader, xmlWriter, currentState);
+            return streamHandler.handleStreamEnd(xmlReader, context);
         }
 
-        return currentState;
+        return context;
     }
 
 

@@ -14,9 +14,8 @@ public class DefaultMessageHandler implements XmppMessageHandler {
     private static final BlockingQueue<MessageInfo> messageQueue = new LinkedBlockingQueue<>();
 
     @Override
-    public ClientState handleMessageStanza(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter, 
-                                          ClientState currentState) throws XMLStreamException {
-        logger.log(Level.INFO, "Handling message stanza, currentState: {0}", currentState);
+    public ClientContext handleMessageStanza(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
+        logger.log(Level.INFO, "Handling message stanza, currentState: {0}", context.getState());
         
         String from = xmlReader.getAttributeValue(null, "from");
         String to = xmlReader.getAttributeValue(null, "to");
@@ -49,11 +48,76 @@ public class DefaultMessageHandler implements XmppMessageHandler {
             }
         }
         
+        // IMPORTANT: Implement message routing instead of just queuing
+        if (to != null && !to.trim().isEmpty()) {
+            routeMessage(context, from, to, messageBody.toString());
+        } else {
+            logger.log(Level.WARNING, "Message has no 'to' attribute, cannot route");
+        }
+        
+        // Still add to queue for backwards compatibility (in case any tests rely on it)
         MessageInfo messageInfo = new MessageInfo(from, to, messageBody.toString());
         messageQueue.offer(messageInfo);
         logger.log(Level.INFO, "Message queued: {0}", messageInfo);
         
-        return currentState;
+        return context;
+    }
+    
+    /**
+     * Route a message from sender to target client.
+     * This is the core functionality that enables client-to-client communication.
+     */
+    private void routeMessage(ClientContext senderContext, String originalFrom, String to, String body) {
+        try {
+            // Use sender's full JID as the 'from' address (overrides client-provided 'from')
+            String actualFrom = senderContext.getFullJid();
+            if (actualFrom == null) {
+                logger.log(Level.WARNING, "Sender has no assigned JID, cannot route message");
+                return;
+            }
+            
+            logger.log(Level.INFO, "ROUTING: Attempting to route message from {0} to {1}", new Object[]{actualFrom, to});
+            logger.log(Level.INFO, "ROUTING: Available clients in registry: {0}", senderContext.getClientRegistry().keySet());
+            
+            // Find target client session
+            ClientSession targetSession = senderContext.findClientSession(to);
+            logger.log(Level.INFO, "ROUTING: Direct lookup for ''{0}'' found: {1}", new Object[]{to, targetSession != null});
+            
+            // If not found by exact JID, try bare JID (remove resource part)
+            if (targetSession == null) {
+                int resourceIndex = to.indexOf('/');
+                if (resourceIndex >= 0) {
+                    String bareJid = to.substring(0, resourceIndex);
+                    targetSession = senderContext.findClientSession(bareJid);
+                    logger.log(Level.INFO, "ROUTING: Bare JID lookup for ''{0}'' found: {1}", new Object[]{bareJid, targetSession != null});
+                } else {
+                    // 'to' is already a bare JID, but let's also try exact match with full JIDs
+                    logger.log(Level.INFO, "ROUTING: Target ''{0}'' is already bare JID, checking full JIDs", to);
+                    for (String registeredJid : senderContext.getClientRegistry().keySet()) {
+                        if (registeredJid.startsWith(to + "/")) {
+                            targetSession = senderContext.findClientSession(registeredJid);
+                            logger.log(Level.INFO, "ROUTING: Found matching full JID: {0}", registeredJid);
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (targetSession != null) {
+                // Route the message to target client - use target's full JID for proper delivery
+                String targetJid = targetSession.getFullJid();
+                targetSession.writeMessageStanza(actualFrom, targetJid, body);
+                logger.log(Level.INFO, "SUCCESS: Message routed from {0} to {1} (target full JID: {2})", new Object[]{actualFrom, to, targetJid});
+            } else {
+                logger.log(Level.WARNING, "FAILED: Target client not found: {0}. Available clients: {1}", 
+                          new Object[]{to, senderContext.getClientRegistry().keySet()});
+                // Optionally send error response to sender
+                // sendErrorResponse(senderContext, "recipient-unavailable");
+            }
+            
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "EXCEPTION: Failed to route message from " + originalFrom + " to " + to, e);
+        }
     }
     
     public static MessageInfo pollMessage() {

@@ -5,6 +5,7 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -16,9 +17,8 @@ public class DefaultIqHandler implements XmppIqHandler {
     private final Logger logger = Logger.getLogger("DefaultIqHandler");
     
     @Override
-    public ClientState handleIqStanza(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter, 
-                                     ClientState currentState) throws XMLStreamException {
-        logger.log(Level.FINE, "Handling IQ Stanza, currentState: {0}", currentState);
+    public ClientContext handleIqStanza(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
+        logger.log(Level.FINE, "Handling IQ Stanza, currentState: {0}", context.getState());
         
         // Read IQ attributes
         String type = xmlReader.getAttributeValue(null, "type");
@@ -28,6 +28,7 @@ public class DefaultIqHandler implements XmppIqHandler {
         // Parse the IQ content
         String queryNs = null;
         boolean hasBind = false;
+        String requestedResource = null;
         
         // Read the IQ content
         while (xmlReader.hasNext()) {
@@ -41,6 +42,9 @@ public class DefaultIqHandler implements XmppIqHandler {
                     queryNs = namespace;
                 } else if ("bind".equals(localName) && XmppServerConfig.NAMESPACE_BIND.equals(namespace)) {
                     hasBind = true;
+                } else if ("resource".equals(localName) && hasBind) {
+                    // Read the requested resource
+                    requestedResource = xmlReader.getElementText();
                 }
             } else if (event == XMLStreamConstants.END_ELEMENT) {
                 if ("iq".equals(xmlReader.getName().getLocalPart())) {
@@ -49,13 +53,30 @@ public class DefaultIqHandler implements XmppIqHandler {
             }
         }
         
+        // Handle resource binding - assign JID and register client
+        if (hasBind && context.getUsername() != null) {
+            String resource = requestedResource;
+            if (resource == null || resource.trim().isEmpty()) {
+                // Generate a unique resource if none provided
+                resource = "resource-" + UUID.randomUUID().toString().substring(0, 8);
+            }
+            
+            String fullJid = context.getUsername() + "@localhost/" + resource;
+            context.setFullJid(fullJid);
+            
+            // Register the client in the global registry
+            context.registerClient();
+            
+            logger.log(Level.INFO, "ASSIGNED JID: {0} to client, registering in registry", fullJid);
+        }
+        
         // Generate response
-        sendIqResponse(xmlWriter, type, id, queryNs, hasBind);
-        return currentState;
+        sendIqResponse(context.getXmlWriter(), type, id, queryNs, hasBind, context);
+        return context;
     }
     
     private void sendIqResponse(XMLStreamWriter xmlWriter, String type, String id, String queryNs,
-                               boolean hasBind) throws XMLStreamException {
+                               boolean hasBind, ClientContext context) throws XMLStreamException {
         xmlWriter.writeStartElement("iq");
         xmlWriter.writeAttribute("type", "result");
         xmlWriter.writeAttribute("id", id);
@@ -78,7 +99,9 @@ public class DefaultIqHandler implements XmppIqHandler {
             xmlWriter.writeStartElement("bind");
             xmlWriter.writeAttribute("xmlns", XmppServerConfig.NAMESPACE_BIND);
             xmlWriter.writeStartElement("jid");
-            xmlWriter.writeCharacters("test@localhost/resource");
+            // Use the assigned JID instead of hardcoded value
+            String jidToReturn = context.getFullJid() != null ? context.getFullJid() : "test@localhost/resource";
+            xmlWriter.writeCharacters(jidToReturn);
             xmlWriter.writeEndElement(); // jid
             xmlWriter.writeEndElement(); // bind
         }

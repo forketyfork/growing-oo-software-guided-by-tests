@@ -22,10 +22,11 @@ public class DefaultStreamHandler implements XmppStreamHandler {
     }
     
     @Override
-    public ClientState handleStreamStart(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter, 
-                                        ClientState currentState) throws XMLStreamException {
+    public ClientContext handleStreamStart(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
         // xmlReader currently isn't used but may be needed for future stream validation
-        logger.log(Level.FINE, "Stream start, currentState: {0}", currentState);
+        logger.log(Level.FINE, "Stream start, currentState: {0}", context.getState());
+        
+        XMLStreamWriter xmlWriter = context.getXmlWriter();
         
         // Send XML declaration and stream header
         xmlWriter.writeStartDocument("UTF-8", "1.0");
@@ -37,26 +38,27 @@ public class DefaultStreamHandler implements XmppStreamHandler {
         xmlWriter.writeNamespace("stream", XmppServerConfig.NAMESPACE_STREAM);
         
         // Send features based on the current state
-        if (currentState == ClientState.WAITING_FOR_STREAM_START) {
+        if (context.getState() == ClientState.WAITING_FOR_STREAM_START) {
             sendSaslFeatures(xmlWriter);
-            return ClientState.WAITING_FOR_AUTH;
-        } else if (currentState == ClientState.AUTHENTICATED_WAITING_FOR_RESTART) {
+            context.setState(ClientState.WAITING_FOR_AUTH);
+        } else if (context.getState() == ClientState.AUTHENTICATED_WAITING_FOR_RESTART) {
             sendBindFeatures(xmlWriter);
-            return ClientState.PROCESSING_STANZAS;
+            context.setState(ClientState.PROCESSING_STANZAS);
         }
         
         xmlWriter.flush();
-        return currentState;
+        return context;
     }
     
     @Override
-    public ClientState handleStreamEnd(XMLStreamReader xmlReader, XMLStreamWriter xmlWriter, 
-                                      ClientState currentState) throws XMLStreamException {
+    public ClientContext handleStreamEnd(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
         // xmlReader currently isn't used but may be needed for future stream validation
-        logger.log(Level.FINE, "Handling stream end, currentState: {0}", currentState);
+        logger.log(Level.FINE, "Handling stream end, currentState: {0}", context.getState());
+        XMLStreamWriter xmlWriter = context.getXmlWriter();
         xmlWriter.writeEndElement(); // Close our stream
         xmlWriter.flush();
-        return ClientState.CLOSED;
+        context.setState(ClientState.CLOSED);
+        return context;
     }
     
     private void sendSaslFeatures(XMLStreamWriter xmlWriter) throws XMLStreamException {
