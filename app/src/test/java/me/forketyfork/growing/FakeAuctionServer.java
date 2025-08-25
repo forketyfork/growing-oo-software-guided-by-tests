@@ -1,12 +1,12 @@
 package me.forketyfork.growing;
 
-import me.forketyfork.growing.xmpp.DefaultMessageHandler;
 import me.forketyfork.growing.xmpp.SimpleXmppServer;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
 import org.jivesoftware.smack.XMPPException;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
+import org.jivesoftware.smack.packet.Message;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 import org.jxmpp.jid.impl.JidCreate;
@@ -27,7 +27,6 @@ public class FakeAuctionServer {
     private final String itemId;
     private final AbstractXMPPConnection connection;
 
-    private Chat currentChat;
 
     private final SingleMessageListener messageListener = new SingleMessageListener();
 
@@ -48,7 +47,7 @@ public class FakeAuctionServer {
         connection.login(String.format(ITEM_ID_AS_LOGIN, itemId), AUCTION_PASSWORD, Resourcepart.from(AUCTION_RESOURCE));
         var chatManager = ChatManager.getInstanceFor(connection);
         chatManager.addIncomingListener(messageListener);
-        currentChat = chatManager.chatWith(JidCreate.from("auction@localhost").asEntityBareJidOrThrow());
+        // Don't create a chat - wait for the sniper to initiate communication
     }
 
     private static synchronized void ensureServerStarted() {
@@ -63,25 +62,13 @@ public class FakeAuctionServer {
     }
 
     public void hasReceivedJoinRequestFromSniper() throws InterruptedException {
-        // Check if any message was received by the server's message handler
-        long timeoutMs = 5000; // 5 second timeout
-        long startTime = System.currentTimeMillis();
-        
-        while (System.currentTimeMillis() - startTime < timeoutMs) {
-            if (DefaultMessageHandler.hasMessages()) {
-                DefaultMessageHandler.MessageInfo message = DefaultMessageHandler.pollMessage();
-                System.out.println("Received message: " + message);
-                return; // Message received successfully
-            }
-            Thread.sleep(100); // Check every 100ms
-        }
-        
-        throw new AssertionError("No message received from sniper within timeout");
+        messageListener.receivesAMessage();
     }
 
     public void announceClosed() throws SmackException.NotConnectedException, InterruptedException {
-        if (currentChat != null) {
-            currentChat.send("");
+        Chat chat = messageListener.getCurrentChat();
+        if (chat != null) {
+            chat.send("");
         }
     }
 

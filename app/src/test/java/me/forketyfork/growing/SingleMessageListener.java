@@ -15,13 +15,19 @@ import static org.hamcrest.Matchers.notNullValue;
 public class SingleMessageListener implements IncomingChatMessageListener {
 
     private final ArrayBlockingQueue<Message> messages = new ArrayBlockingQueue<>(1);
+    private Chat currentChat;
 
     public void receivesAMessage() throws InterruptedException {
         assertThat("Message", messages.poll(5, TimeUnit.SECONDS), is(notNullValue()));
     }
 
+    public Chat getCurrentChat() {
+        return currentChat;
+    }
+
     @Override
     public void newIncomingMessage(EntityBareJid from, Message message, Chat chat) {
         messages.add(message);
+        this.currentChat = chat;
     }
 }
