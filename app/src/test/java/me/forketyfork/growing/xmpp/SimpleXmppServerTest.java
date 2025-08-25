@@ -3,6 +3,7 @@ package me.forketyfork.growing.xmpp;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
+import org.jivesoftware.smack.packet.Message;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 import org.junit.jupiter.api.AfterEach;
@@ -48,6 +49,10 @@ public class SimpleXmppServerTest {
     }
 
     private AbstractXMPPConnection newConnection(int port, String user, String resource) throws Exception {
+        return newConnection(port, user, resource, "password");
+    }
+
+    private AbstractXMPPConnection newConnection(int port, String user, String resource, String password) throws Exception {
         XMPPTCPConnectionConfiguration config = XMPPTCPConnectionConfiguration.builder()
                 .setHost("localhost")
                 .setXmppDomain("localhost")
@@ -56,16 +61,23 @@ public class SimpleXmppServerTest {
                 .setCompressionEnabled(false)
                 .build();
         AbstractXMPPConnection connection = new XMPPTCPConnection(config);
-        connection.connect();
-        connection.login(user, "password", Resourcepart.from(resource));
-        connections.add(connection);
-        return connection;
+        try {
+            connection.connect();
+            connection.login(user, password, Resourcepart.from(resource));
+            connections.add(connection);
+            return connection;
+        } catch (Exception e) {
+            if (connection.isConnected()) {
+                connection.disconnect();
+            }
+            throw e;
+        }
     }
 
     @Test
     public void serverAcceptsConnectionsAndStops() throws Exception {
         int port = freePort();
-        server = new SimpleXmppServer(new XmppServerConfig(port, "localhost", 200, 1000, 100));
+        server = new SimpleXmppServer(new XmppServerConfig(port, "localhost", 200, 1000, 100, java.util.Map.of()));
         server.start();
 
         try (Socket socket = new Socket("localhost", port)) {
@@ -81,7 +93,7 @@ public class SimpleXmppServerTest {
     @Test
     public void routesMessagesBetweenClients() throws Exception {
         int port = freePort();
-        server = new SimpleXmppServer(new XmppServerConfig(port, "localhost", 200, 1000, 100));
+        server = new SimpleXmppServer(new XmppServerConfig(port, "localhost", 200, 1000, 100, java.util.Map.of()));
         server.start();
 
         AbstractXMPPConnection alice = newConnection(port, "alice", "res1");
@@ -101,5 +113,61 @@ public class SimpleXmppServerTest {
 
         assertEquals(1, messages.size());
         assertEquals("hello", messages.get(0));
+    }
+
+    @Test
+    public void rejectsConnectionsBeyondLimit() throws Exception {
+        int port = freePort();
+        server = new SimpleXmppServer(new XmppServerConfig(port, "localhost", 200, 1000, 1, java.util.Map.of()));
+        server.start();
+
+        AbstractXMPPConnection alice = newConnection(port, "alice", "res1");
+        assertNotNull(alice); // first connection succeeds
+
+        assertThrows(Exception.class, () -> newConnection(port, "bob", "res2"));
+    }
+
+    @Test
+    public void rejectsInvalidCredentials() throws Exception {
+        int port = freePort();
+        XmppServerConfig config = XmppServerConfig.builder()
+                .port(port)
+                .serverName("localhost")
+                .socketTimeoutMs(200)
+                .shutdownTimeoutMs(1000)
+                .maxConnections(100)
+                .addUser("alice", "secret")
+                .build();
+        server = new SimpleXmppServer(config);
+        server.start();
+
+        assertThrows(Exception.class, () -> newConnection(port, "alice", "res1", "wrong"));
+    }
+
+    @Test
+    public void returnsErrorWhenRecipientUnavailable() throws Exception {
+        int port = freePort();
+        server = new SimpleXmppServer(new XmppServerConfig(port, "localhost", 200, 1000, 100, java.util.Map.of()));
+        server.start();
+
+        AbstractXMPPConnection alice = newConnection(port, "alice", "res1");
+
+        List<Message> messages = new ArrayList<>();
+        alice.addAsyncStanzaListener(stanza -> {
+            if (stanza instanceof Message msg) {
+                messages.add(msg);
+            }
+        }, stanza -> stanza instanceof Message);
+
+        EntityBareJid bobJid = JidCreate.entityBareFrom("bob@localhost");
+        Chat chat = ChatManager.getInstanceFor(alice).chatWith(bobJid);
+        chat.send("hello");
+
+        for (int i = 0; i < 20 && messages.isEmpty(); i++) {
+            Thread.sleep(100);
+        }
+
+        assertEquals(1, messages.size());
+        assertEquals("Message delivery failed: recipient-unavailable", messages.get(0).getBody());
     }
 }
