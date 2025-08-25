@@ -52,6 +52,7 @@ public class SimpleXmppServer {
     private final XmppStreamHandler streamHandler;
     private final XmppSaslHandler saslHandler;
     private final XmppIqHandler iqHandler;
+    private final XmppMessageHandler messageHandler;
 
     public SimpleXmppServer(int port) {
         this(new XmppServerConfig(port));
@@ -62,6 +63,7 @@ public class SimpleXmppServer {
         this.streamHandler = new DefaultStreamHandler(config);
         this.saslHandler = new DefaultSaslHandler();
         this.iqHandler = new DefaultIqHandler();
+        this.messageHandler = new DefaultMessageHandler();
     }
 
     public void start() throws IOException {
@@ -273,6 +275,11 @@ public class SimpleXmppServer {
         // Handle IQ stanzas
         if ("iq".equals(localName) && XmppServerConfig.NAMESPACE_CLIENT.equals(namespace)) {
             return iqHandler.handleIqStanza(xmlReader, xmlWriter, currentState);
+        }
+
+        // Handle message stanzas
+        if ("message".equals(localName) && XmppServerConfig.NAMESPACE_CLIENT.equals(namespace)) {
+            return messageHandler.handleMessageStanza(xmlReader, xmlWriter, currentState);
         }
 
         return currentState;

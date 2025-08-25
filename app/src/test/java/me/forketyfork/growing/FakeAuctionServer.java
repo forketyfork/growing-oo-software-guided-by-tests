@@ -1,5 +1,6 @@
 package me.forketyfork.growing;
 
+import me.forketyfork.growing.xmpp.DefaultMessageHandler;
 import me.forketyfork.growing.xmpp.SimpleXmppServer;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
@@ -62,7 +63,20 @@ public class FakeAuctionServer {
     }
 
     public void hasReceivedJoinRequestFromSniper() throws InterruptedException {
-        messageListener.receivesAMessage();
+        // Check if any message was received by the server's message handler
+        long timeoutMs = 5000; // 5 second timeout
+        long startTime = System.currentTimeMillis();
+        
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            if (DefaultMessageHandler.hasMessages()) {
+                DefaultMessageHandler.MessageInfo message = DefaultMessageHandler.pollMessage();
+                System.out.println("Received message: " + message);
+                return; // Message received successfully
+            }
+            Thread.sleep(100); // Check every 100ms
+        }
+        
+        throw new AssertionError("No message received from sniper within timeout");
     }
 
     public void announceClosed() throws SmackException.NotConnectedException, InterruptedException {
