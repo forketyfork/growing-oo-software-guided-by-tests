@@ -7,6 +7,10 @@ repositories {
 }
 
 dependencies {
+    implementation(libs.smack)
+    implementation(libs.smack.extensions)
+    implementation(libs.smack.tcp)
+
     testImplementation(libs.windowlicker)
     testImplementation(libs.smack)
     testImplementation(libs.smack.tcp)

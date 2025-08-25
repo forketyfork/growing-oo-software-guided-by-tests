@@ -34,7 +34,7 @@ public class FakeAuctionServer {
         this.itemId = itemId;
         this.connection = new XMPPTCPConnection(XMPPTCPConnectionConfiguration.builder()
                 .setHost(XMPP_HOSTNAME)
-                .setXmppDomain("localhost")
+                .setXmppDomain(XMPP_HOSTNAME)
                 .setPort(5222)
                 .setSecurityMode(org.jivesoftware.smack.ConnectionConfiguration.SecurityMode.disabled)
                 .setCompressionEnabled(false)
