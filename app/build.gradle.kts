@@ -52,6 +52,10 @@ java {
     }
 }
 
+tasks.withType<JavaCompile> {
+    options.compilerArgs.addAll(arrayOf("-Xlint:all", "-Xlint:-serial"))
+}
+
 application {
     mainClass = "me.forketyfork.growing.Main"
 }

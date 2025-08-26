@@ -48,7 +48,7 @@ public class Main {
     }
 
     private void startUserInterface() throws Exception {
-        SwingUtilities.invokeAndWait((Runnable) () -> ui = new MainWindow());
+        SwingUtilities.invokeAndWait((Runnable) () -> ui = MainWindow.createAndShow());
     }
 
     private static XMPPConnection connectTo(String hostname, String username, String password) throws XMPPException, IOException, SmackException, InterruptedException {
