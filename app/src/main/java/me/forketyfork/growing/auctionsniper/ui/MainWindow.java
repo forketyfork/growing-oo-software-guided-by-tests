@@ -10,10 +10,20 @@ public class MainWindow extends JFrame {
     public static final String SNIPER_STATUS_NAME = "Status";
     public static final String MAIN_WINDOW_NAME = "Auction Sniper Main";
 
-    private final JLabel sniperStatus = createLabel(STATUS_JOINING);
+    private final JLabel sniperStatus;
 
-    public MainWindow() {
+    private MainWindow() {
         super("Auction Sniper");
+        this.sniperStatus = createLabel(STATUS_JOINING);
+    }
+
+    public static MainWindow createAndShow() {
+        MainWindow window = new MainWindow();
+        window.initialize();
+        return window;
+    }
+
+    private void initialize() {
         setName(MAIN_WINDOW_NAME);
         add(sniperStatus);
         pack();
