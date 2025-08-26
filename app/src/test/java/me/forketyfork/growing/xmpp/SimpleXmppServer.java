@@ -239,6 +239,16 @@ public class SimpleXmppServer {
                     }
 
                     try {
+                        if (xmlWriter != null && context != null && context.getState() != ClientState.CLOSED) {
+                            // Properly close XML stream if not already closed
+                            try {
+                                xmlWriter.writeEndElement(); // Close the stream:stream element
+                                xmlWriter.writeEndDocument(); // Close the XML document
+                                xmlWriter.flush();
+                            } catch (XMLStreamException e) {
+                                logger.log(Level.FINE, "Error properly closing XML stream", e);
+                            }
+                        }
                         if (xmlWriter != null) {
                             xmlWriter.close();
                         }

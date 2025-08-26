@@ -35,6 +35,15 @@ tasks.withType<JavaExec> {
 
 tasks.withType<Test> {
     systemProperty("java.util.logging.config.file", "src/main/resources/logging.properties")
+    
+    testLogging {
+        events("passed", "skipped", "failed", "standardOut", "standardError")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showExceptions = true
+        showCauses = true
+        showStackTraces = true
+        showStandardStreams = true
+    }
 }
 
 java {
