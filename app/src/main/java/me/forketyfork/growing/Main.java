@@ -12,6 +12,7 @@ import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
 import org.jxmpp.jid.EntityBareJid;
 import org.jxmpp.jid.impl.JidCreate;
 import org.jxmpp.jid.parts.Resourcepart;
+import org.jxmpp.stringprep.XmppStringprepException;
 
 import javax.swing.*;
 import java.io.IOException;
@@ -29,21 +30,27 @@ public class Main {
 
     private MainWindow ui;
 
+    @SuppressWarnings("unused")
+    private Chat notToBeGCd;
+
     public Main() throws Exception {
         startUserInterface();
     }
 
     public static void main(String... args) throws Exception {
         Main main = new Main();
+        main.joinAuction(connectTo(args[ARG_HOSTNAME], args[ARG_USERNAME], args[ARG_PASSWORD]), args[ARG_ITEM_ID]);
+    }
 
-        XMPPConnection connection = connectTo(args[ARG_HOSTNAME], args[ARG_USERNAME], args[ARG_PASSWORD]);
-
+    private void joinAuction(XMPPConnection connection, String itemId) throws SmackException.NotConnectedException, InterruptedException, XmppStringprepException {
         var chatManager = ChatManager.getInstanceFor(connection);
         chatManager.addIncomingListener((EntityBareJid from, Message message, Chat chat) -> {
-            // nothing yet
+            SwingUtilities.invokeLater(() -> {
+                ui.showStatus(MainWindow.STATUS_LOST);
+            });
         });
 
-        var chat = chatManager.chatWith(JidCreate.from(auctionId(args[ARG_ITEM_ID], connection)).asEntityBareJidOrThrow());
+        var chat = chatManager.chatWith(JidCreate.from(auctionId(itemId, connection)).asEntityBareJidOrThrow());
         chat.send("");
     }
 
