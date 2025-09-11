@@ -19,14 +19,17 @@ jobs:
     - name: Set up JDK
       uses: actions/setup-java@v4
       with:
-        java-version: '21'
+        java-version: '24'
         distribution: 'temurin'
         
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
       
+    - name: Install virtual display
+      run: sudo apt-get update && sudo apt-get install -y xvfb
+      
     - name: Build with Gradle
       run: ./gradlew build --warning-mode fail
       
     - name: Run tests
-      run: ./gradlew test
+      run: xvfb-run -a ./gradlew test
