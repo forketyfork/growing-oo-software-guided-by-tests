@@ -14,6 +14,9 @@ import org.jxmpp.stringprep.XmppStringprepException;
 
 import java.io.IOException;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.*;
+
 public class FakeAuctionServer {
 
     public static final String ITEM_ID_AS_LOGIN = "auction-%s";
@@ -70,7 +73,7 @@ public class FakeAuctionServer {
     }
 
     public void hasReceivedJoinRequestFromSniper() throws InterruptedException {
-        messageListener.receivesAMessage();
+        messageListener.receivesAMessage(is(anything()));
     }
 
     public void announceClosed() throws SmackException.NotConnectedException, InterruptedException {
@@ -87,6 +90,18 @@ public class FakeAuctionServer {
 
     public String getItemId() {
         return itemId;
+    }
+
+    public void reportPrice(int price, int increment, String bidder) throws SmackException.NotConnectedException, InterruptedException {
+        Chat currentChat = messageListener.getCurrentChat();
+        currentChat.send(String.format("SOLVersion: 1.1; Event: PRICE; CurrentPrice: %d; Increment: %d; Bidder: %s;",
+                price, increment, bidder));
+    }
+
+    public void hasReceivedBid(int bid, String sniperId) {
+        Chat currentChat = messageListener.getCurrentChat();
+        assertThat(currentChat.getXmppAddressOfChatPartner().asUnescapedString(), equalTo(sniperId));
+        messageListener.receivesAMessage(equalTo(String.format("SOLVersion: 1.1; Command: BID; Price: %d;", bid)));
     }
 
 }
