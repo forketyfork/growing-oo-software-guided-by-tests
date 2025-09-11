@@ -1,5 +1,6 @@
 package me.forketyfork.growing;
 
+import org.hamcrest.Matcher;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.IncomingChatMessageListener;
 import org.jivesoftware.smack.packet.Message;
@@ -17,8 +18,10 @@ public class SingleMessageListener implements IncomingChatMessageListener {
     private final ArrayBlockingQueue<Message> messages = new ArrayBlockingQueue<>(1);
     private Chat currentChat;
 
-    public void receivesAMessage() throws InterruptedException {
-        assertThat("Message", messages.poll(5, TimeUnit.SECONDS), is(notNullValue()));
+    public void receivesAMessage(Matcher<? super String> messageMatcher) throws InterruptedException {
+        final Message message = messages.poll(5, TimeUnit.SECONDS);
+        assertThat("Message", message, is(notNullValue()));
+        assertThat(message.getBody(), messageMatcher);
     }
 
     public Chat getCurrentChat() {

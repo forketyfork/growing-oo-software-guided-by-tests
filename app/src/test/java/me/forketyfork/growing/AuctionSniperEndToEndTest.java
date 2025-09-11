@@ -1,6 +1,8 @@
 package me.forketyfork.growing;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.jxmpp.stringprep.XmppStringprepException;
 
@@ -16,7 +18,24 @@ public class AuctionSniperEndToEndTest {
     public void sniperJoinsAuctionUntilAuctionCloses() throws Exception {
         auction.startSellingItem();
         application.startBiddingIn(auction);
-        auction.hasReceivedJoinRequestFromSniper();
+        auction.hasReceivedJoinRequestFrom(ApplicationRunner.SNIPER_XMPP_ID);
+        auction.announceClosed();
+        application.showsSniperHasLostAuction();
+    }
+
+    @Test
+    @Disabled
+    public void sniperMakesAHigherBidButLoses() throws Exception {
+        auction.startSellingItem();
+
+        application.startBiddingIn(auction);
+        auction.hasReceivedJoinRequestFrom(ApplicationRunner.SNIPER_XMPP_ID);
+
+        auction.reportPrice(1000, 98, "other bidder");
+        application.hasShownSniperIsBidding();
+
+        auction.hasReceivedBid(1098, ApplicationRunner.SNIPER_XMPP_ID);
+
         auction.announceClosed();
         application.showsSniperHasLostAuction();
     }
@@ -25,6 +44,11 @@ public class AuctionSniperEndToEndTest {
     @AfterEach
     public void stopAuction() {
         auction.stop();
+    }
+
+    @AfterAll
+    public static void stopEmbeddedServer() {
+        FakeAuctionServer.stopEmbeddedServer();
     }
 
     @AfterEach

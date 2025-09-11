@@ -27,6 +27,7 @@ public record XmppServerConfig(
     public static final String NAMESPACE_CLIENT = "jabber:client";
     public static final String NAMESPACE_SASL = "urn:ietf:params:xml:ns:xmpp-sasl";
     public static final String NAMESPACE_BIND = "urn:ietf:params:xml:ns:xmpp-bind";
+    public static final String NAMESPACE_STREAMS = "urn:ietf:params:xml:ns:xmpp-streams";
     public static final String NAMESPACE_SESSION = "urn:ietf:params:xml:ns:xmpp-session";
     public static final String NAMESPACE_COMPRESSION = "http://jabber.org/features/compress";
     public static final String NAMESPACE_IQ_AUTH = "jabber:iq:auth";

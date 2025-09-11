@@ -2,6 +2,7 @@ package me.forketyfork.growing;
 
 import me.forketyfork.growing.xmpp.SimpleXmppServer;
 import me.forketyfork.growing.xmpp.XmppServerConfig;
+import org.hamcrest.Matcher;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
 import org.jivesoftware.smack.XMPPException;
@@ -13,6 +14,9 @@ import org.jxmpp.jid.parts.Resourcepart;
 import org.jxmpp.stringprep.XmppStringprepException;
 
 import java.io.IOException;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 
 public class FakeAuctionServer {
 
@@ -69,8 +73,18 @@ public class FakeAuctionServer {
         }
     }
 
-    public void hasReceivedJoinRequestFromSniper() throws InterruptedException {
-        messageListener.receivesAMessage();
+    public void hasReceivedJoinRequestFrom(String sniperId) throws InterruptedException {
+        receivesAMessageMatching(sniperId, equalTo(Main.JOIN_COMMAND_FORMAT));
+    }
+
+    public void hasReceivedBid(int bid, String sniperId) throws InterruptedException {
+        receivesAMessageMatching(sniperId, equalTo(String.format(Main.BID_COMMAND_FORMAT, bid)));
+    }
+
+    private void receivesAMessageMatching(String sniperId, Matcher<? super String> messageMatcher) throws InterruptedException {
+        messageListener.receivesAMessage(messageMatcher);
+        Chat currentChat = messageListener.getCurrentChat();
+        assertThat(currentChat.getXmppAddressOfChatPartner().asUnescapedString(), equalTo(sniperId));
     }
 
     public void announceClosed() throws SmackException.NotConnectedException, InterruptedException {
@@ -82,12 +96,20 @@ public class FakeAuctionServer {
 
     public void stop() {
         connection.disconnect();
+    }
+
+    public static void stopEmbeddedServer() {
         embeddedServer.stop();
+        embeddedServer = null;
     }
 
     public String getItemId() {
         return itemId;
     }
 
-}
+    public void reportPrice(int price, int increment, String bidder) throws SmackException.NotConnectedException, InterruptedException {
+        Chat currentChat = messageListener.getCurrentChat();
+        currentChat.send(String.format(Main.REPORT_PRICE_EVENT_FORMAT, price, increment, bidder));
+    }
 
+}
