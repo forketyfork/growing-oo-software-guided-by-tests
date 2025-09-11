@@ -73,7 +73,7 @@ public class FakeAuctionServer {
         }
     }
 
-    public void hasReceivedJoinRequestFromSniper(String sniperId) throws InterruptedException {
+    public void hasReceivedJoinRequestFrom(String sniperId) throws InterruptedException {
         receivesAMessageMatching(sniperId, equalTo(Main.JOIN_COMMAND_FORMAT));
     }
 
@@ -105,9 +105,7 @@ public class FakeAuctionServer {
 
     public void reportPrice(int price, int increment, String bidder) throws SmackException.NotConnectedException, InterruptedException {
         Chat currentChat = messageListener.getCurrentChat();
-        currentChat.send(String.format("SOLVersion: 1.1; Event: PRICE; CurrentPrice: %d; Increment: %d; Bidder: %s;",
-                price, increment, bidder));
+        currentChat.send(String.format(Main.REPORT_PRICE_EVENT_FORMAT, price, increment, bidder));
     }
 
 }
-

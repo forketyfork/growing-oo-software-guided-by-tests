@@ -17,6 +17,8 @@ import org.jxmpp.stringprep.XmppStringprepException;
 import javax.swing.*;
 import java.io.IOException;
 
+import static org.jivesoftware.smack.ConnectionConfiguration.SecurityMode;
+
 public class Main {
 
     public static final int ARG_HOSTNAME = 0;
@@ -27,6 +29,11 @@ public class Main {
     public static final String AUCTION_RESOURCE = "Auction";
     public static final String ITEM_ID_AS_LOGIN = "auction-%s";
     public static final String AUCTION_ID_FORMAT = ITEM_ID_AS_LOGIN + "@%s/" + AUCTION_RESOURCE;
+
+    // event and command formats
+    public static final String REPORT_PRICE_EVENT_FORMAT = "SOLVersion: 1.1; Event: PRICE; CurrentPrice: %d; Increment: %d; Bidder: %s;";
+    public static final String BID_COMMAND_FORMAT = "SOLVersion: 1.1; Command: BID; Price: %d;";
+    public static final String JOIN_COMMAND_FORMAT = "SOLVersion: 1.1; Command: JOIN;";
 
     private MainWindow ui;
 
@@ -44,14 +51,11 @@ public class Main {
 
     private void joinAuction(XMPPConnection connection, String itemId) throws SmackException.NotConnectedException, InterruptedException, XmppStringprepException {
         var chatManager = ChatManager.getInstanceFor(connection);
-        chatManager.addIncomingListener((EntityBareJid from, Message message, Chat chat) -> {
-            SwingUtilities.invokeLater(() -> {
-                ui.showStatus(MainWindow.STATUS_LOST);
-            });
-        });
+        chatManager.addIncomingListener((EntityBareJid from, Message message, Chat chat) ->
+                SwingUtilities.invokeLater(() -> ui.showStatus(MainWindow.STATUS_LOST)));
 
         var chat = chatManager.chatWith(JidCreate.from(auctionId(itemId, connection)).asEntityBareJidOrThrow());
-        chat.send("");
+        chat.send(JOIN_COMMAND_FORMAT);
     }
 
     private void startUserInterface() throws Exception {
@@ -63,7 +67,7 @@ public class Main {
                 .setHost(hostname)
                 .setXmppDomain("localhost")
                 .setPort(5222)
-                .setSecurityMode(org.jivesoftware.smack.ConnectionConfiguration.SecurityMode.disabled)
+                .setSecurityMode(SecurityMode.disabled)
                 .setCompressionEnabled(false)
                 .build())
                 .connect();
