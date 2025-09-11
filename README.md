@@ -1,3 +1,9 @@
+# Growing Object-Oriented Software Guided by Tests
+
+[![Build status](https://github.com/forketyfork/growing-oo-software-guided-by-tests/actions/workflows/build.yml/badge.svg)](https://github.com/forketyfork/growing-oo-software-guided-by-tests/actions/workflows/build.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Java](https://img.shields.io/badge/language-Java-orange.svg)](https://www.oracle.com/java/)
+
 Code along with the book "Growing Object-Oriented Software Guided by Tests"
 
 ## Project structure and dependencies
