@@ -2,6 +2,7 @@ package me.forketyfork.growing;
 
 import me.forketyfork.growing.xmpp.SimpleXmppServer;
 import me.forketyfork.growing.xmpp.XmppServerConfig;
+import org.hamcrest.Matcher;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
 import org.jivesoftware.smack.XMPPException;
@@ -15,7 +16,7 @@ import org.jxmpp.stringprep.XmppStringprepException;
 import java.io.IOException;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.equalTo;
 
 public class FakeAuctionServer {
 
@@ -72,8 +73,18 @@ public class FakeAuctionServer {
         }
     }
 
-    public void hasReceivedJoinRequestFromSniper() throws InterruptedException {
-        messageListener.receivesAMessage(is(anything()));
+    public void hasReceivedJoinRequestFromSniper(String sniperId) throws InterruptedException {
+        receivesAMessageMatching(sniperId, equalTo(Main.JOIN_COMMAND_FORMAT));
+    }
+
+    public void hasReceivedBid(int bid, String sniperId) throws InterruptedException {
+        receivesAMessageMatching(sniperId, equalTo(String.format(Main.BID_COMMAND_FORMAT, bid)));
+    }
+
+    private void receivesAMessageMatching(String sniperId, Matcher<? super String> messageMatcher) throws InterruptedException {
+        messageListener.receivesAMessage(messageMatcher);
+        Chat currentChat = messageListener.getCurrentChat();
+        assertThat(currentChat.getXmppAddressOfChatPartner().asUnescapedString(), equalTo(sniperId));
     }
 
     public void announceClosed() throws SmackException.NotConnectedException, InterruptedException {
@@ -96,12 +107,6 @@ public class FakeAuctionServer {
         Chat currentChat = messageListener.getCurrentChat();
         currentChat.send(String.format("SOLVersion: 1.1; Event: PRICE; CurrentPrice: %d; Increment: %d; Bidder: %s;",
                 price, increment, bidder));
-    }
-
-    public void hasReceivedBid(int bid, String sniperId) {
-        Chat currentChat = messageListener.getCurrentChat();
-        assertThat(currentChat.getXmppAddressOfChatPartner().asUnescapedString(), equalTo(sniperId));
-        messageListener.receivesAMessage(equalTo(String.format("SOLVersion: 1.1; Command: BID; Price: %d;", bid)));
     }
 
 }
