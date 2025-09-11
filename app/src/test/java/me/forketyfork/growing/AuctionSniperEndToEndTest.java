@@ -1,5 +1,6 @@
 package me.forketyfork.growing;
 
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.jxmpp.stringprep.XmppStringprepException;
@@ -41,6 +42,11 @@ public class AuctionSniperEndToEndTest {
     @AfterEach
     public void stopAuction() {
         auction.stop();
+    }
+
+    @AfterAll
+    public static void stopEmbeddedServer() {
+        FakeAuctionServer.stopEmbeddedServer();
     }
 
     @AfterEach

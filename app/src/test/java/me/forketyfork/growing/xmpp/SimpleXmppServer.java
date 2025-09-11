@@ -48,6 +48,9 @@ public class SimpleXmppServer {
     // Client session registry for message routing
     private static final ConcurrentHashMap<String, ClientSession> clientRegistry = new ConcurrentHashMap<>();
 
+    // Set of connected usernames for efficient duplicate connection checking
+    private static final Set<String> connectedUsernames = Collections.synchronizedSet(new HashSet<>());
+
     // Handler interfaces for extensibility
     private final XmppStreamHandler streamHandler;
     private final XmppSaslHandler saslHandler;
@@ -177,7 +180,7 @@ public class SimpleXmppServer {
 
                 ClientContext context = null;
                 try {
-                    context = new ClientContext(ClientState.WAITING_FOR_STREAM_START, xmlWriter, clientRegistry);
+                    context = new ClientContext(ClientState.WAITING_FOR_STREAM_START, xmlWriter, clientRegistry, connectedUsernames);
 
                     // Event-driven XML processing loop with periodic message processing
                     long lastMessageCheck = System.currentTimeMillis();
@@ -222,8 +225,6 @@ public class SimpleXmppServer {
                                         }
                                     }
                                 }
-                                // Continue processing instead of breaking
-                                continue;
                             } else {
                                 logger.log(Level.FINE, "XML parsing error, closing connection", e);
                                 break;
@@ -239,12 +240,16 @@ public class SimpleXmppServer {
                     if (context != null && context.getFullJid() != null) {
                         clientRegistry.remove(context.getFullJid());
                         clientRegistry.remove(context.getBareJid());
+                        // Remove username from connected usernames set for efficient duplicate checking
+                        if (context.getUsername() != null) {
+                            connectedUsernames.remove(context.getUsername());
+                        }
                         logger.log(Level.INFO, "Removed client {0} from registry", context.getFullJid());
                     }
 
                     try {
                         if (xmlWriter != null && context != null && context.getState() != ClientState.CLOSED) {
-                            // Properly close XML stream if not already closed
+                            // Properly close the XML stream if not already closed
                             try {
                                 xmlWriter.writeEndElement(); // Close the stream:stream element
                                 xmlWriter.writeEndDocument(); // Close the XML document

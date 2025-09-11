@@ -86,7 +86,7 @@ public class SimpleXmppServerTest {
 
         server.stop();
 
-        // After stop the port should be unavailable
+        // After stop, the port should be unavailable
         assertThrows(ConnectException.class, () -> new Socket("localhost", port));
     }
 
@@ -100,7 +100,7 @@ public class SimpleXmppServerTest {
         AbstractXMPPConnection bob = newConnection(port, "bob", "res2");
 
         List<String> messages = new ArrayList<>();
-        ChatManager.getInstanceFor(bob).addIncomingListener((from, message, chat) -> messages.add(message.getBody()));
+        ChatManager.getInstanceFor(bob).addIncomingListener((_, message, _) -> messages.add(message.getBody()));
 
         EntityBareJid bobJid = JidCreate.entityBareFrom("bob@localhost");
         Chat chat = ChatManager.getInstanceFor(alice).chatWith(bobJid);
@@ -112,7 +112,7 @@ public class SimpleXmppServerTest {
         }
 
         assertEquals(1, messages.size());
-        assertEquals("hello", messages.get(0));
+        assertEquals("hello", messages.getFirst());
     }
 
     @Test
@@ -122,7 +122,7 @@ public class SimpleXmppServerTest {
         server.start();
 
         AbstractXMPPConnection alice = newConnection(port, "alice", "res1");
-        assertNotNull(alice); // first connection succeeds
+        assertNotNull(alice); // first, connection succeeds
 
         assertThrows(Exception.class, () -> newConnection(port, "bob", "res2"));
     }
@@ -168,6 +168,20 @@ public class SimpleXmppServerTest {
         }
 
         assertEquals(1, messages.size());
-        assertEquals("Message delivery failed: recipient-unavailable", messages.get(0).getBody());
+        assertEquals("Message delivery failed: recipient-unavailable", messages.getFirst().getBody());
+    }
+
+    @Test
+    public void rejectsDuplicateConnectionsForSameUser() throws Exception {
+        int port = freePort();
+        server = new SimpleXmppServer(new XmppServerConfig(port, "localhost", 200, 1000, 100, java.util.Map.of()));
+        server.start();
+
+        // First, connection should succeed
+        AbstractXMPPConnection alice1 = newConnection(port, "alice", "res1");
+        assertTrue(alice1.isAuthenticated());
+
+        // Second connection with same username should be rejected with conflict
+        assertThrows(Exception.class, () -> newConnection(port, "alice", "res2"));
     }
 }

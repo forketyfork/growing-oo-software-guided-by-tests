@@ -96,6 +96,9 @@ public class FakeAuctionServer {
 
     public void stop() {
         connection.disconnect();
+    }
+
+    public static void stopEmbeddedServer() {
         embeddedServer.stop();
         embeddedServer = null;
     }

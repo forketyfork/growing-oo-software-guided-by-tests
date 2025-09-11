@@ -3,16 +3,16 @@ package me.forketyfork.growing.xmpp;
 import org.junit.jupiter.api.Test;
 
 import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLOutputFactory;
+import javax.xml.stream.XMLStreamReader;
 import javax.xml.stream.XMLStreamWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
-import java.util.Base64;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class DefaultSaslHandlerTest {
 
@@ -26,7 +26,8 @@ public class DefaultSaslHandlerTest {
     }
 
     private ClientContext createContext(XMLStreamWriter writer) {
-        return new ClientContext(ClientState.WAITING_FOR_AUTH, writer, new ConcurrentHashMap<>());
+        Set<String> connectedUsernames = Collections.synchronizedSet(new HashSet<>());
+        return new ClientContext(ClientState.WAITING_FOR_AUTH, writer, new ConcurrentHashMap<>(), connectedUsernames);
     }
 
     @Test

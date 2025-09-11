@@ -10,24 +10,39 @@ import java.util.logging.Logger;
  * Default implementation of XmppStreamHandler.
  */
 public class DefaultStreamHandler implements XmppStreamHandler {
-    
+
     private final Logger logger = Logger.getLogger("DefaultStreamHandler");
     private final XmppServerConfig config;
-    
+
     public DefaultStreamHandler(XmppServerConfig config) {
         if (config == null) {
             throw new IllegalArgumentException("XmppServerConfig cannot be null");
         }
         this.config = config;
     }
-    
+
     @Override
     public ClientContext handleStreamStart(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
         // xmlReader currently isn't used but may be needed for future stream validation
         logger.log(Level.FINE, "Stream start, currentState: {0}", context.getState());
-        
+
         XMLStreamWriter xmlWriter = context.getXmlWriter();
-        
+
+        // Check for duplicate connections before proceeding
+        String username = context.getUsername();
+        if (isUserAlreadyConnected(context, username)) {
+            logger.log(Level.WARNING, "User {0} attempted duplicate connection, rejecting with 409 Conflict", username);
+            xmlWriter.writeStartElement("error");
+            xmlWriter.writeAttribute("xmlns", XmppServerConfig.NAMESPACE_STREAM);
+            xmlWriter.writeStartElement("conflict");
+            xmlWriter.writeAttribute("xmlns", XmppServerConfig.NAMESPACE_STREAMS);
+            xmlWriter.writeEndElement();
+            xmlWriter.writeEndElement();
+            xmlWriter.flush();
+            context.setState(ClientState.CLOSED);
+            return context;
+        }
+
         // Send XML declaration and stream header
         xmlWriter.writeStartDocument("UTF-8", "1.0");
         xmlWriter.writeStartElement("stream", "stream", XmppServerConfig.NAMESPACE_STREAM);
@@ -36,7 +51,7 @@ public class DefaultStreamHandler implements XmppStreamHandler {
         xmlWriter.writeAttribute("version", "1.0");
         xmlWriter.writeDefaultNamespace(XmppServerConfig.NAMESPACE_CLIENT);
         xmlWriter.writeNamespace("stream", XmppServerConfig.NAMESPACE_STREAM);
-        
+
         // Send features based on the current state
         if (context.getState() == ClientState.WAITING_FOR_STREAM_START) {
             sendSaslFeatures(xmlWriter);
@@ -45,25 +60,29 @@ public class DefaultStreamHandler implements XmppStreamHandler {
             sendBindFeatures(xmlWriter);
             context.setState(ClientState.PROCESSING_STANZAS);
         }
-        
+
         xmlWriter.flush();
         return context;
     }
-    
+
     @Override
     public ClientContext handleStreamEnd(XMLStreamReader xmlReader, ClientContext context) throws XMLStreamException {
         // xmlReader currently isn't used but may be needed for future stream validation
         logger.log(Level.FINE, "Handling stream end, currentState: {0}", context.getState());
         XMLStreamWriter xmlWriter = context.getXmlWriter();
-        
+
         xmlWriter.writeEndElement(); // Close the stream:stream element
         xmlWriter.writeEndDocument(); // Close the XML document
         xmlWriter.flush();
-        
+
         context.setState(ClientState.CLOSED);
         return context;
     }
-    
+
+    private boolean isUserAlreadyConnected(ClientContext context, String username) {
+        return context.getConnectedUsernames().contains(username);
+    }
+
     private void sendSaslFeatures(XMLStreamWriter xmlWriter) throws XMLStreamException {
         xmlWriter.writeStartElement("stream", "features", XmppServerConfig.NAMESPACE_STREAM);
         xmlWriter.writeStartElement("mechanisms");
@@ -75,7 +94,7 @@ public class DefaultStreamHandler implements XmppStreamHandler {
         xmlWriter.writeEndElement(); // features
         xmlWriter.flush();
     }
-    
+
     private void sendBindFeatures(XMLStreamWriter xmlWriter) throws XMLStreamException {
         xmlWriter.writeStartElement("stream", "features", XmppServerConfig.NAMESPACE_STREAM);
         xmlWriter.writeStartElement("compression");
