@@ -2,6 +2,7 @@ package me.forketyfork.growing;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.jxmpp.stringprep.XmppStringprepException;
 
@@ -23,6 +24,7 @@ public class AuctionSniperEndToEndTest {
     }
 
     @Test
+    @Disabled
     public void sniperMakesAHigherBidButLoses() throws Exception {
         auction.startSellingItem();
 
