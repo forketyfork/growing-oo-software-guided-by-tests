@@ -97,6 +97,7 @@ public class FakeAuctionServer {
     public void stop() {
         connection.disconnect();
         embeddedServer.stop();
+        embeddedServer = null;
     }
 
     public String getItemId() {

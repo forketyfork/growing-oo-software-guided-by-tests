@@ -67,7 +67,11 @@ public class SimpleXmppServer {
     }
 
     public void start() throws IOException {
-        if (running.getAndSet(true)) return;
+        logger.info("Starting the XMPP server");
+        if (running.getAndSet(true)) {
+            logger.warning("Server is already running");
+            return;
+        }
         serverSocket = new ServerSocket(config.port());
         acceptor.submit(() -> {
             while (running.get()) {
