@@ -1,6 +1,7 @@
 package me.forketyfork.growing;
 
 import me.forketyfork.growing.auctionsniper.ui.MainWindow;
+import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
 import org.jivesoftware.smack.XMPPConnection;
 import org.jivesoftware.smack.XMPPException;
@@ -15,6 +16,8 @@ import org.jxmpp.jid.parts.Resourcepart;
 import org.jxmpp.stringprep.XmppStringprepException;
 
 import javax.swing.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.IOException;
 
 import static org.jivesoftware.smack.ConnectionConfiguration.SecurityMode;
@@ -49,7 +52,8 @@ public class Main {
         main.joinAuction(connectTo(args[ARG_HOSTNAME], args[ARG_USERNAME], args[ARG_PASSWORD]), args[ARG_ITEM_ID]);
     }
 
-    private void joinAuction(XMPPConnection connection, String itemId) throws SmackException.NotConnectedException, InterruptedException, XmppStringprepException {
+    private void joinAuction(AbstractXMPPConnection connection, String itemId) throws SmackException.NotConnectedException, InterruptedException, XmppStringprepException {
+        disconnectWhenCloses(connection);
         var chatManager = ChatManager.getInstanceFor(connection);
         chatManager.addIncomingListener((EntityBareJid from, Message message, Chat chat) ->
                 SwingUtilities.invokeLater(() -> ui.showStatus(MainWindow.STATUS_LOST)));
@@ -58,11 +62,20 @@ public class Main {
         chat.send(JOIN_COMMAND_FORMAT);
     }
 
+    private void disconnectWhenCloses(AbstractXMPPConnection connection) {
+        ui.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent e) {
+                connection.disconnect();
+            }
+        });
+    }
+
     private void startUserInterface() throws Exception {
         SwingUtilities.invokeAndWait((Runnable) () -> ui = MainWindow.createAndShow());
     }
 
-    private static XMPPConnection connectTo(String hostname, String username, String password) throws XMPPException, IOException, SmackException, InterruptedException {
+    private static AbstractXMPPConnection connectTo(String hostname, String username, String password) throws XMPPException, IOException, SmackException, InterruptedException {
         var connection = new XMPPTCPConnection(XMPPTCPConnectionConfiguration.builder()
                 .setHost(hostname)
                 .setXmppDomain("localhost")
