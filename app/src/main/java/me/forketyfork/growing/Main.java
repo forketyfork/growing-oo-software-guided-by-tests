@@ -1,5 +1,7 @@
 package me.forketyfork.growing;
 
+import me.forketyfork.growing.auctionsniper.AuctionEventListener;
+import me.forketyfork.growing.auctionsniper.AuctionMessageTranslator;
 import me.forketyfork.growing.auctionsniper.ui.MainWindow;
 import org.jivesoftware.smack.AbstractXMPPConnection;
 import org.jivesoftware.smack.SmackException;
@@ -7,10 +9,8 @@ import org.jivesoftware.smack.XMPPConnection;
 import org.jivesoftware.smack.XMPPException;
 import org.jivesoftware.smack.chat2.Chat;
 import org.jivesoftware.smack.chat2.ChatManager;
-import org.jivesoftware.smack.packet.Message;
 import org.jivesoftware.smack.tcp.XMPPTCPConnection;
 import org.jivesoftware.smack.tcp.XMPPTCPConnectionConfiguration;
-import org.jxmpp.jid.EntityBareJid;
 import org.jxmpp.jid.impl.JidCreate;
 import org.jxmpp.jid.parts.Resourcepart;
 import org.jxmpp.stringprep.XmppStringprepException;
@@ -22,7 +22,7 @@ import java.io.IOException;
 
 import static org.jivesoftware.smack.ConnectionConfiguration.SecurityMode;
 
-public class Main {
+public class Main implements AuctionEventListener {
 
     public static final int ARG_HOSTNAME = 0;
     public static final int ARG_USERNAME = 1;
@@ -52,11 +52,15 @@ public class Main {
         main.joinAuction(connectTo(args[ARG_HOSTNAME], args[ARG_USERNAME], args[ARG_PASSWORD]), args[ARG_ITEM_ID]);
     }
 
+    @Override
+    public void auctionClosed() {
+        SwingUtilities.invokeLater(() -> ui.showStatus(MainWindow.STATUS_LOST));
+    }
+
     private void joinAuction(AbstractXMPPConnection connection, String itemId) throws SmackException.NotConnectedException, InterruptedException, XmppStringprepException {
         disconnectWhenCloses(connection);
         var chatManager = ChatManager.getInstanceFor(connection);
-        chatManager.addIncomingListener((EntityBareJid from, Message message, Chat chat) ->
-                SwingUtilities.invokeLater(() -> ui.showStatus(MainWindow.STATUS_LOST)));
+        chatManager.addIncomingListener(new AuctionMessageTranslator(this));
 
         var chat = chatManager.chatWith(JidCreate.from(auctionId(itemId, connection)).asEntityBareJidOrThrow());
         chat.send(JOIN_COMMAND_FORMAT);
