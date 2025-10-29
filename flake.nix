@@ -14,11 +14,11 @@
             {
                 devShells.default = pkgs.mkShell {
                     buildInputs = with pkgs; [
-                        jdk24
+                        jdk25
                     ];
                     
                     shellHook = ''
-                      export JAVA_HOME=${pkgs.jdk24}
+                      export JAVA_HOME=${pkgs.jdk25}
 
                       echo "🚀 Growing OO Software dev environment ready"
                       echo "   Java version: $(java -version 2>&1 | head -1)"
