@@ -1,6 +1,7 @@
 [versions]
 windowlicker = "r268"
 smack = "4.5.0-beta9"
+jmock = "2.13.1"
 
 [libraries]
 windowlicker = { module = "com.googlecode.windowlicker:windowlicker-swing", version.ref = "windowlicker" }
@@ -8,3 +9,4 @@ smack = { module = "org.igniterealtime.smack:smack-java11", version.ref = "smack
 smack-tcp = { module = "org.igniterealtime.smack:smack-tcp", version.ref = "smack" }
 smack-im = { module = "org.igniterealtime.smack:smack-im", version.ref = "smack" }
 smack-extensions = { module = "org.igniterealtime.smack:smack-extensions", version.ref = "smack" }
+jmock = { module = "org.jmock:jmock", version.ref = "jmock" }
