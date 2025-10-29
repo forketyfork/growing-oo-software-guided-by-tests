@@ -16,6 +16,7 @@ dependencies {
     testImplementation(libs.smack.tcp)
     testImplementation(libs.smack.im)
     testImplementation(libs.smack.extensions)
+    testImplementation(libs.jmock)
 }
 
 testing {
@@ -23,7 +24,7 @@ testing {
         // Configure the built-in test suite
         val test by getting(JvmTestSuite::class) {
             // Use JUnit Jupiter test framework
-            useJUnitJupiter("5.10.3")
+            useJUnitJupiter("6.0.0")
         }
     }
 }
