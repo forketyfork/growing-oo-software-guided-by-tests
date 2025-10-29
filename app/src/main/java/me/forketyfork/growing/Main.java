@@ -57,6 +57,11 @@ public class Main implements AuctionEventListener {
         SwingUtilities.invokeLater(() -> ui.showStatus(MainWindow.STATUS_LOST));
     }
 
+    @Override
+    public void currentPrice(int price, int increment) {
+        // TODO
+    }
+
     private void joinAuction(AbstractXMPPConnection connection, String itemId) throws SmackException.NotConnectedException, InterruptedException, XmppStringprepException {
         disconnectWhenCloses(connection);
         var chatManager = ChatManager.getInstanceFor(connection);
