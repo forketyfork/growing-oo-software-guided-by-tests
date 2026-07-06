@@ -22,6 +22,7 @@
 
                       echo "🚀 Growing OO Software dev environment ready"
                       echo "   Java version: $(java -version 2>&1 | head -1)"
+                      echo "   Gradle version: $(gradle --version | grep Gradle)"
                     '';
                 };
             });
