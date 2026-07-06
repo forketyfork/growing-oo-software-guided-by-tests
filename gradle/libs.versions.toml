@@ -1,6 +1,6 @@
 [versions]
 windowlicker = "r268"
-smack = "4.5.0-beta9"
+smack = "4.5.0-rc1"
 
 [libraries]
 windowlicker = { module = "com.googlecode.windowlicker:windowlicker-swing", version.ref = "windowlicker" }
