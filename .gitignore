@@ -39,3 +39,6 @@ openfire/
 
 # Ignore the direnv directory
 .direnv/
+
+.architect/
+.tmp/
